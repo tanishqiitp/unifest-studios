@@ -101,7 +101,7 @@ function drawPlan(doc: jsPDF, p: Project, x0: number, y0: number, maxW: number, 
 }
 
 export function exportTechnicalPDF(p: Project) {
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' })
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3', compress: true })
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const t = totals(p)
@@ -161,7 +161,8 @@ export function exportTechnicalPDF(p: Project) {
     const k = Math.min(maxW / c.width, maxH / c.height)
     doc.setFontSize(9)
     doc.text(`Pixel map  ·  ${pl.width} × ${pl.height} px canvas`, MARGIN, y)
-    doc.addImage(c.toDataURL('image/png'), 'PNG', MARGIN, y + 3, c.width * k, c.height * k)
+    // JPEG keeps the pack small enough to send on WhatsApp or email.
+    doc.addImage(c.toDataURL('image/jpeg', 0.85), 'JPEG', MARGIN, y + 3, c.width * k, c.height * k, undefined, 'FAST')
   }
 
   // Power

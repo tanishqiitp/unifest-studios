@@ -5,7 +5,6 @@ import { useStore } from '../store'
 import { fmt, pixelLayout, totals } from '../lib/calc'
 import { download, exportDXF, exportPixelMap, exportProject, exportResolume, pixelMapCanvas, shareLink, slug } from '../lib/export/files'
 import { equipmentCSV } from '../lib/export/equipment'
-import { exportTechnicalPDF } from '../lib/export/pdf'
 
 export function DeliverWorkspace() {
   const project = useStore((s) => s.project)
@@ -25,14 +24,16 @@ export function DeliverWorkspace() {
       .catch(() => setQr(null))
   }, [link, qrFits])
 
-  const run = (label: string, fn: () => void) => {
+  const run = async (label: string, fn: () => void | Promise<void>) => {
     try {
-      fn()
+      await fn()
       notify(`${label} exported`)
     } catch (e) {
       notify(`Export failed: ${(e as Error).message}`)
     }
   }
+  // The PDF library is large, so it loads on first use.
+  const pdf = () => run('Technical PDF', async () => (await import('../lib/export/pdf')).exportTechnicalPDF(project))
 
   return (
     <div className="h-full overflow-y-auto">
@@ -87,7 +88,7 @@ export function DeliverWorkspace() {
           <div>
             <h2 className="font-display text-lg font-semibold mb-1">Technical crew</h2>
             <p className="text-xs text-mute mb-4">Files ready for the build.</p>
-            <Row icon={<FileText size={15} />} title="Technical PDF pack" sub="Screens, pixel map, power phases, circuits, rigging loads, ground plan, equipment" action="PDF" onClick={() => run('Technical PDF', () => exportTechnicalPDF(project))} primary />
+            <Row icon={<FileText size={15} />} title="Technical PDF pack" sub="Screens, pixel map, power phases, circuits, rigging loads, ground plan, equipment" action="PDF" onClick={pdf} primary />
             <Row icon={<Ruler size={15} />} title="AutoCAD blueprint (.DXF)" sub="1:1 metres · top view + front elevation · layered" action="DXF" onClick={() => run('DXF', () => exportDXF(project))} />
             <Row icon={<ImageIcon size={15} />} title="Official LED pixel map" sub={pl.width ? `Native ${pl.width} × ${pl.height} px PNG content template` : 'Add a screen first'} action="PNG" onClick={() => run('Pixel map', () => exportPixelMap(project))} disabled={!pl.width} />
             <Row icon={<FileCode2 size={15} />} title="Resolume Arena 7" sub="Advanced Output XML preset (beta: check in Arena)" action="XML" onClick={() => run('Resolume 7 XML', () => exportResolume(project, 7))} disabled={!pl.width} />

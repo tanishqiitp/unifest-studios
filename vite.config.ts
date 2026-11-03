@@ -4,4 +4,6 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // three.js is one big chunk, but it only loads when a 3D view opens.
+  build: { chunkSizeWarningLimit: 1500 },
 })

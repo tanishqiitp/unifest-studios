@@ -36,9 +36,17 @@ No complete open-source truss/LED planner exists. The calculations in `src/lib/c
 5. Deliver: exports + share link + QR
 6. New-event wizard + templates
 
+## v0.2 (done)
+- Show-quality 3D: bloom, haze, moving beams, reflective floor, real truss lattice, crowd, three looks, click-to-inspect, labels
+- Walkthrough video export (16:9 and 9:16) and 4K stills
+- Home screen with a multi-project library, workspace guides
+- 3D and PDF load on demand (startup ~230 KB gzip)
+- Smaller PDF (JPEG pixel map) and QR-sized share links for every template
+- Vitest suite, CI workflow, Vercel/Netlify config
+
 ## Later
+- Hosting (needs a GitHub repository and a Vercel/Netlify account)
 - Supabase auth/cloud
-- Video walkthrough export
 - NDI/DMX
 - Site-plan PDF tracing (image tracing is in v0.1)
 - Collaborative comments

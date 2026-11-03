@@ -113,6 +113,7 @@ export interface Fixture {
 
 export interface Project {
   version: 1
+  id?: string // set when the project is stored in this browser's library
   name: string
   eventType: string
   units: Units

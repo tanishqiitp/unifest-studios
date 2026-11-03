@@ -3,6 +3,8 @@ import { temporal } from 'zundo'
 import type { Mode, Project, Screen, Workspace } from './types'
 import { findPanel } from './lib/panels'
 import { generateProject, TEMPLATES } from './lib/templates'
+import { loadCurrent, writeProject } from './lib/library'
+import { nanoid } from 'nanoid'
 
 export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture'; id: string } | null
 export type LedOverlay = 'none' | 'data' | 'power'
@@ -17,6 +19,8 @@ interface UI {
   overlay: LedOverlay
   wizardOpen: boolean
   shortcutsOpen: boolean
+  home: boolean
+  guideOpen: boolean
   warningsOpen: boolean
   toast: string | null
 }
@@ -31,16 +35,8 @@ interface State {
   notify: (msg: string) => void
 }
 
-const STORAGE_KEY = 'unifest:project'
-
 function loadInitial(): Project {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as Project
-  } catch {
-    /* fall through to template */
-  }
-  return generateProject(TEMPLATES[0])
+  return loadCurrent() ?? { ...generateProject(TEMPLATES[0]), id: nanoid(10) }
 }
 
 // Live symmetry: mirrored screens copy their source and flip across the venue centre line.
@@ -68,7 +64,7 @@ export const useStore = create<State>()(
     (set, get) => ({
       project: loadInitial(),
       ui: {
-        workspace: 'led',
+        workspace: 'ground',
         mode: 'simple',
         selection: null,
         tool: 'select',
@@ -76,6 +72,8 @@ export const useStore = create<State>()(
         overlay: 'none',
         wizardOpen: false,
         shortcutsOpen: false,
+        home: true,
+        guideOpen: false,
         warningsOpen: false,
         toast: null,
       },
@@ -87,6 +85,7 @@ export const useStore = create<State>()(
         set({ project: p })
       },
       setProject: (p) => {
+        if (!p.id) p.id = nanoid(10)
         syncMirrors(p)
         set({ project: p, ui: { ...get().ui, selection: null } })
       },
@@ -113,20 +112,9 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined
 useStore.subscribe((s, prev) => {
   if (s.project === prev.project) return
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(s.project))
-    } catch {
-      /* storage full or blocked: file save still works */
-    }
-  }, 400)
+  saveTimer = setTimeout(() => writeProject(s.project), 400)
 })
 
 export function saveNow() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(useStore.getState().project))
-    return true
-  } catch {
-    return false
-  }
+  return writeProject(useStore.getState().project)
 }

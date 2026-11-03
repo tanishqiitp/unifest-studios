@@ -9,7 +9,19 @@ npm run dev
 ```
 Open http://localhost:5173 on a desktop browser at least 1024 px wide.
 
-`npm run build` writes a static site to `dist/`. It can be hosted anywhere (Vercel, Netlify, any static host). Share links only work for other people once the app is hosted.
+- `npm test` runs the automated checks (LED, power, rigging, templates, share links, exports, project library).
+- `npm run build` writes a static site to `dist/`.
+
+## Put it online
+Share links and QR codes only work for other people once the app is hosted. It is a static site, so any static host works:
+- **Vercel or Netlify:** push this folder to GitHub, import the repository, and accept the defaults (`vercel.json` / `netlify.toml` are included).
+- **Anywhere else:** upload the contents of `dist/`.
+
+`.github/workflows/ci.yml` runs the tests and build on every push.
+
+## Getting around
+- The **home screen** lists your saved projects (open, open in 3D, duplicate, delete) and the templates. Click the logo to return to it.
+- Each workspace shows a short **guide** with a button to the next step. The **?** button in the top bar brings it back.
 
 ## Workspaces (keys 1–6)
 1. **Ground Plan**:
@@ -31,9 +43,12 @@ Open http://localhost:5173 on a desktop browser at least 1024 px wide.
    - **Live symmetry**, **Paint** for empty panels, and curved screens.
    - Pro mode: data-port snake and 3-phase power plan.
 5. **3D Visualizer**:
-   - Built live from the 2D plans.
-   - Camera presets, day/night, light beams.
-   - Play your own video or image on the screens; PNG render.
+   - Built live from the 2D plans: aluminium truss with real lattice, chain hoists, J-curve line arrays, stacked subs, moving heads, FOH tent, gates and a crowd that moves.
+   - Three looks: **Night show** (bloom, haze, moving beams with floor hits, screen glow lighting the stage, reflective floor, 5 colour palettes), **Daylight** (sky, sun shadows) and **Technical** (clean model with dimension labels).
+   - Six camera presets with smooth moves, plus **Showcase** auto-orbit.
+   - Click any screen, truss or the stage for its specs.
+   - Play your own video or image on the screens.
+   - **Render** a high-resolution PNG (up to 4K wide) and record a **walkthrough video**: 16:9 (1920×1080) or 9:16 social reel (1080×1920), MP4 in Chrome/Edge, WebM elsewhere.
 6. **Deliver**:
    - Client 3D share link with QR and WhatsApp share.
    - Technical PDF pack, 1:1 DXF and native pixel-map PNG.
@@ -52,6 +67,9 @@ Simple/Pro mode is switched in the top bar. Projects autosave in the browser; us
 - `src/lib/warnings.ts`: plain-English checks shown in the bottom bar.
 - `src/lib/templates.ts`: new-event wizard and the 7 templates.
 - `src/lib/export/*`: PDF, DXF, PNG, Resolume XML, CSV and the share link.
+- `src/lib/library.ts`: saved-projects library in the browser (migrates v0.1's single save).
+- `src/lib/__tests__/*`: Vitest tests.
+- `src/components/Home.tsx`, `Guide.tsx`: home screen and workspace guides.
 - `src/workspaces/*`: one file per workspace. `src/components/PlanCanvas.tsx` is the shared pan/zoom/measure canvas.
 
 ## Accuracy notes

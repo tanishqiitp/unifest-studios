@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ChevronDown, FolderOpen, Keyboard, Magnet, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { AlertTriangle, ChevronDown, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -10,18 +10,32 @@ import { LedWorkspace, newScreen } from './workspaces/Led'
 import { GroundWorkspace } from './workspaces/Ground'
 import { StageWorkspace } from './workspaces/Stage'
 import { TrussWorkspace } from './workspaces/Truss'
-import { Viewer, Viz3DWorkspace } from './workspaces/Viz3D'
 import { DeliverWorkspace } from './workspaces/Deliver'
 import { Check, Modal, Num, Seg, Sel, Txt } from './components/ui'
+import { Home } from './components/Home'
+import { Guide } from './components/Guide'
 import { nanoid } from 'nanoid'
 
-const TABS: { id: Workspace; label: string; kicker: string }[] = [
-  { id: 'ground', label: 'Ground Plan', kicker: '01' },
-  { id: 'stage', label: 'Stage', kicker: '02' },
-  { id: 'truss', label: 'Truss & Rigging', kicker: '03' },
-  { id: 'led', label: 'LED Screens', kicker: '04' },
-  { id: 'viz', label: '3D Visualizer', kicker: '05' },
-  { id: 'deliver', label: 'Deliver', kicker: '06' },
+// The 3D engine is large, so it loads only when someone opens a 3D view.
+const Viz3DWorkspace = lazy(() => import('./workspaces/Viz3D').then((m) => ({ default: m.Viz3DWorkspace })))
+const Viewer = lazy(() => import('./workspaces/Viz3D').then((m) => ({ default: m.Viewer })))
+
+function Loading3D() {
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-3 text-xs text-mute">
+      <div className="h-6 w-6 rounded-full border-2 border-line border-t-white animate-spin" />
+      Loading 3D engine…
+    </div>
+  )
+}
+
+const TABS: { id: Workspace; label: string; short: string; kicker: string }[] = [
+  { id: 'ground', label: 'Ground Plan', short: 'Ground', kicker: '01' },
+  { id: 'stage', label: 'Stage', short: 'Stage', kicker: '02' },
+  { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '03' },
+  { id: 'led', label: 'LED Screens', short: 'LED', kicker: '04' },
+  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '05' },
+  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '06' },
 ]
 
 export default function App() {
@@ -49,7 +63,9 @@ function SharedView() {
         <div className="text-[11px] text-mute hidden sm:block">Interactive 3D preview · designed with Unifest Studios</div>
       </header>
       <div className="flex-1 min-h-0">
-        <Viewer project={p} compact />
+        <Suspense fallback={<Loading3D />}>
+          <Viewer project={p} compact />
+        </Suspense>
       </div>
     </div>
   )
@@ -78,6 +94,14 @@ function Studio() {
   useShortcuts()
 
   if (narrow) return <DesktopGate />
+  if (ui.home)
+    return (
+      <>
+        <Home />
+        {ui.wizardOpen && <Wizard />}
+        {ui.toast && <Toast msg={ui.toast} />}
+      </>
+    )
   return (
     <div className="h-full flex flex-col">
       <TopBar />
@@ -86,15 +110,28 @@ function Studio() {
         {ui.workspace === 'stage' && <StageWorkspace />}
         {ui.workspace === 'truss' && <TrussWorkspace />}
         {ui.workspace === 'led' && <LedWorkspace />}
-        {ui.workspace === 'viz' && <Viz3DWorkspace />}
+        {ui.workspace === 'viz' && (
+          <Suspense fallback={<Loading3D />}>
+            <Viz3DWorkspace />
+          </Suspense>
+        )}
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
         {['ground', 'stage', 'truss', 'led'].includes(ui.workspace) && <Hud />}
         {['ground', 'stage', 'truss', 'led'].includes(ui.workspace) && <ToolRail />}
+        <Guide />
       </div>
       <WarningsBar />
       {ui.wizardOpen && <Wizard />}
       {ui.shortcutsOpen && <Shortcuts />}
-      {ui.toast && <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-white text-black text-xs font-medium px-4 py-2 fade-in shadow-2xl">{ui.toast}</div>}
+      {ui.toast && <Toast msg={ui.toast} />}
+    </div>
+  )
+}
+
+function Toast({ msg }: { msg: string }) {
+  return (
+    <div role="status" className="fixed bottom-14 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-white text-black text-xs font-medium px-4 py-2 fade-in shadow-2xl">
+      {msg}
     </div>
   )
 }
@@ -125,10 +162,12 @@ function TopBar() {
   const [menu, setMenu] = useState(false)
   return (
     <header className="h-14 shrink-0 flex items-center gap-3 px-4 border-b border-line bg-ink">
-      <Logo />
+      <button title="All projects" onClick={() => (saveNow(), setUI({ home: true, wizardOpen: false }))}>
+        <Logo />
+      </button>
       <div className="w-px h-6 bg-line" />
       <input
-        className="bg-transparent text-sm font-medium w-44 rounded-md px-2 h-8 border border-transparent hover:border-line focus:border-white outline-none"
+        className="bg-transparent text-sm font-medium w-32 xl:w-44 rounded-md px-2 h-8 border border-transparent hover:border-line focus:border-white outline-none"
         value={project.name}
         onChange={(e) => mutate((p) => void (p.name = e.target.value))}
         aria-label="Project name"
@@ -138,10 +177,11 @@ function TopBar() {
           <button
             key={t.id}
             onClick={() => setUI({ workspace: t.id, tool: 'select' })}
-            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
+            className={`h-8 px-2.5 xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
           >
-            <span className={`mono text-[9px] ${ui.workspace === t.id ? 'text-black/50' : 'text-mute'}`}>{t.kicker}</span>
-            {t.label}
+            <span className={`mono text-[9px] hidden xl:inline ${ui.workspace === t.id ? 'text-black/50' : 'text-mute'}`}>{t.kicker}</span>
+            <span className="hidden xl:inline">{t.label}</span>
+            <span className="xl:hidden">{t.short}</span>
           </button>
         ))}
       </nav>
@@ -168,7 +208,18 @@ function TopBar() {
           </button>
           {menu && (
             <div className="absolute right-0 top-10 z-40 w-56 card p-1 fade-in" onMouseLeave={() => setMenu(false)}>
+              <MenuItem icon={<HomeIcon size={13} />} label="All projects" onClick={() => (saveNow(), setUI({ home: true }), setMenu(false))} />
               <MenuItem icon={<Plus size={13} />} label="New event…" onClick={() => (setUI({ wizardOpen: true }), setMenu(false))} />
+              <MenuItem
+                icon={<Copy size={13} />}
+                label="Duplicate project"
+                onClick={() => {
+                  saveNow()
+                  setProject({ ...structuredClone(project), id: undefined, name: `${project.name} copy`, updatedAt: Date.now() })
+                  notify('Duplicated. You are now editing the copy.')
+                  setMenu(false)
+                }}
+              />
               <MenuItem icon={<FolderOpen size={13} />} label="Open .unifest file…" onClick={() => (file.current?.click(), setMenu(false))} />
               <MenuItem icon={<Save size={13} />} label="Save to this browser" hint="Ctrl+S" onClick={() => (saveNow() ? notify('Saved') : notify('Could not save: storage blocked'), setMenu(false))} />
               <div className="h-px bg-line my-1" />
@@ -193,11 +244,14 @@ function TopBar() {
             const f = e.target.files?.[0]
             if (!f) return
             readProjectFile(f)
-              .then((p) => (setProject(p), notify(`Opened ${p.name}`)))
+              .then((p) => (setProject({ ...p, id: undefined }), notify(`Opened ${p.name}`)))
               .catch((err) => notify(err.message))
             e.target.value = ''
           }}
         />
+        <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
+          <HelpCircle size={14} />
+        </button>
         <button className="btn btn-icon" title="Keyboard shortcuts (?)" onClick={() => setUI({ shortcutsOpen: true })}>
           <Keyboard size={14} />
         </button>
@@ -222,20 +276,21 @@ function MenuItem({ icon, label, hint, onClick }: { icon: React.ReactNode; label
 function Hud() {
   const project = useStore((s) => s.project)
   const t = totals(project)
-  const items: [string, string, string?][] = [
-    ['Total pixels', `${t.pxW} × ${t.pxH}`, 'px'],
-    ['LED area', `${fmt(t.ledArea, 1)} m²`],
-    ['Stage', t.stage],
+  // [label, value, shown only on wide screens]
+  const items: [string, string, boolean?][] = [
+    ['Total pixels', `${t.pxW} × ${t.pxH}`],
+    ['LED area', `${fmt(t.ledArea, 1)} m²`, true],
+    ['Stage', t.stage, true],
     ['Weight', `${Math.round(t.weight).toLocaleString('en-IN')} kg`],
     ['Power', `${fmt(t.powerKw, 1)} kW`],
-    ['Capacity', `${t.capacity.toLocaleString('en-IN')}`],
+    ['Capacity', `${t.capacity.toLocaleString('en-IN')}`, true],
   ]
   const ws = useStore((s) => s.ui.workspace)
   const left = ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' ? 'left-[272px]' : 'left-4'
   return (
     <div className={`absolute top-4 ${left} z-10 glass rounded-xl flex divide-x divide-line pointer-events-none`}>
-      {items.map(([k, v]) => (
-        <div key={k} className="px-3 py-1.5">
+      {items.map(([k, v, wide]) => (
+        <div key={k} className={`px-3 py-1.5 ${wide ? 'hidden 2xl:block' : ''}`}>
           <div className="text-[9px] tracking-widest uppercase text-mute font-semibold">{k}</div>
           <div className="mono text-[13px] font-medium whitespace-nowrap">{v}</div>
         </div>
@@ -313,7 +368,7 @@ function Wizard() {
   const [inp, setInp] = useState<WizardInput>({ name: 'My event', eventType: 'College Fest', audience: 1500, venueW: 50, venueL: 70, outdoor: true })
   const create = (w: WizardInput) => {
     setProject(generateProject(w))
-    setUI({ wizardOpen: false, workspace: 'ground' })
+    setUI({ wizardOpen: false, home: false, workspace: 'ground' })
     useStore.temporal.getState().clear()
     notify('Starter layout generated. Every part is editable.')
   }
@@ -337,7 +392,8 @@ function Wizard() {
             className="btn w-full justify-center"
             onClick={() => {
               setProject({ ...generateProject(inp), screens: [], truss: [], hoists: [], fixtures: [], decks: [], ground: [] })
-              setUI({ wizardOpen: false, workspace: 'ground' })
+              useStore.temporal.getState().clear()
+              setUI({ wizardOpen: false, home: false, workspace: 'ground' })
             }}
           >
             Start blank

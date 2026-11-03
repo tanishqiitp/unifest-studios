@@ -84,6 +84,11 @@ export function exportPixelMap(p: Project) {
 // ---------- DXF (1:1 metres) ----------
 
 export function exportDXF(p: Project) {
+  download(`${slug(p)}.dxf`, dxfString(p), 'application/dxf')
+}
+
+// 1:1 metre drawing: top view plus a front elevation offset to the right.
+export function dxfString(p: Project) {
   const d = new Drawing()
   d.setUnits('Meters')
   d.addLayer('VENUE', Drawing.ACI.WHITE, 'CONTINUOUS')
@@ -172,12 +177,16 @@ export function exportDXF(p: Project) {
       }
     d.setActiveLayer('TEXT').drawText(ox + s.x, s.z + st.h + 0.3, 0.35, 0, `${s.name} ${st.pxW}x${st.pxH}px ${st.w.toFixed(2)}x${st.h.toFixed(2)}m`).setActiveLayer('LED')
   }
-  download(`${slug(p)}.dxf`, d.toDxfString(), 'application/dxf')
+  return d.toDxfString()
 }
 
 // ---------- Resolume Arena advanced output (best effort, unverified schema) ----------
 
 export function exportResolume(p: Project, version: 6 | 7) {
+  download(`${slug(p)}-resolume-arena${version}.xml`, resolumeXml(p, version), 'application/xml')
+}
+
+export function resolumeXml(p: Project, version: 6 | 7) {
   const pl = pixelLayout(p)
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
   let uid = 1700000000000
@@ -217,7 +226,7 @@ ${slices}
   </ScreenSetup>
 </XmlState>
 `
-  download(`${slug(p)}-resolume-arena${version}.xml`, xml, 'application/xml')
+  return xml
 }
 
 // ---------- Project file & share link ----------
@@ -258,6 +267,7 @@ export function shareLink(p: Project) {
   const ids = new Map(p.screens.map((s, i) => [s.id, `s${i}`]))
   const lite: Project = {
     ...p,
+    id: undefined,
     venue: { ...p.venue, image: undefined },
     screens: p.screens.map((s) => ({ ...s, id: ids.get(s.id)!, mirrorOf: s.mirrorOf ? ids.get(s.mirrorOf) : undefined, image: undefined })),
     decks: mergeDecks(p.decks),
@@ -266,14 +276,42 @@ export function shareLink(p: Project) {
     hoists: short(p.hoists, 'h'),
     fixtures: short(p.fixtures, 'f'),
   }
-  return `${location.origin}${location.pathname}#view=${compressToEncodedURIComponent(JSON.stringify(lite, (_k, v) => (typeof v === "number" ? Math.round(v * 1000) / 1000 : v)))}`
+  for (const k of LISTS) (lite[k] as unknown as Record<string, unknown>[]) = (lite[k] as unknown as Record<string, unknown>[]).map(dropDefaults)
+  return `${location.origin}${location.pathname}#view=${compressToEncodedURIComponent(JSON.stringify(lite, (_k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)))}`
+}
+
+// Share links leave out zero, false, empty-text and empty-list fields on list items; reading puts them back.
+const LISTS = ['screens', 'ground', 'decks', 'truss', 'hoists', 'fixtures'] as const
+const ITEM_DEFAULTS: Record<(typeof LISTS)[number], Record<string, unknown>> = {
+  screens: { virtual: [], x: 0, y: 0, z: 0, rotation: 0, curveDeg: 0, shape: 'flat' },
+  ground: { x: 0, y: 0, rotation: 0, label: '' },
+  decks: { x: 0, y: 0 },
+  truss: { x1: 0, y1: 0, x2: 0, y2: 0, legs: false },
+  hoists: { x: 0, y: 0 },
+  fixtures: { x: 0, y: 0, z: 0 },
+}
+
+function dropDefaults(o: Record<string, unknown>) {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(o)) {
+    if (v === 0 || v === false || v === '' || v === undefined || (Array.isArray(v) && v.length === 0)) continue
+    if (k === 'shape' && v === 'flat') continue
+    out[k] = v
+  }
+  return out
+}
+
+export function restoreDefaults(p: Project): Project {
+  for (const k of LISTS) (p[k] as unknown as Record<string, unknown>[]) = ((p[k] ?? []) as unknown as Record<string, unknown>[]).map((o) => ({ ...ITEM_DEFAULTS[k], ...o }))
+  return p
 }
 
 export function readShareHash(): Project | null {
   const m = location.hash.match(/#view=(.+)$/)
   if (!m) return null
   try {
-    return JSON.parse(decompressFromEncodedURIComponent(m[1]) ?? 'null') as Project
+    const p = JSON.parse(decompressFromEncodedURIComponent(m[1]) ?? 'null') as Project | null
+    return p ? restoreDefaults(p) : null
   } catch {
     return null
   }

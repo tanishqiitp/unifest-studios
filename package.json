@@ -1,17 +1,19 @@
 {
   "name": "unifest-studios",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
+    "@react-three/postprocessing": "^3.2.2",
     "dxf-writer": "^1.18.4",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
@@ -19,6 +21,7 @@
     "lucide-react": "^1.66.0",
     "lz-string": "^1.5.0",
     "nanoid": "^6.0.2",
+    "postprocessing": "^6.39.6",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -38,6 +41,7 @@
     "oxlint": "^1.89.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   }
 }
