@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Box, Cloud, CloudUpload, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2 } from 'lucide-react'
+import { ArrowRight, Box, Building2, Users, Cloud, CloudUpload, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import type { Project } from '../types'
 import { screenColumns, screenStats } from '../lib/calc'
@@ -31,6 +31,9 @@ export function ProjectThumb({ p }: { p: Project }) {
       {p.decks.map((d) => (
         <rect key={d.id} x={d.x} y={d.y} width={d.w} height={d.l} fill="#d8d8d8" />
       ))}
+      {(p.tables ?? []).map((t) =>
+        t.kind === 'round' || t.kind === 'cocktail' ? <circle key={t.id} cx={t.x} cy={t.y} r={t.w / 2 + 0.4} fill="#6a6a6a" /> : <rect key={t.id} x={t.x - t.w / 2} y={t.y - 0.5} width={t.w} height={1} fill="#6a6a6a" transform={`rotate(${t.rotation} ${t.x} ${t.y})`} />,
+      )}
       {p.truss.map((t) => (
         <line key={t.id} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke="#8a8a8a" strokeWidth={0.4} />
       ))}
@@ -119,6 +122,9 @@ export function Home() {
         </div>
         <div className="flex items-center gap-2">
           <AccountButton />
+          <button className="btn" onClick={() => setUI({ venuesOpen: true })}>
+            <Building2 size={13} /> Venues
+          </button>
           <button className="btn" onClick={() => file.current?.click()}>
             <FolderOpen size={13} /> Open file
           </button>
@@ -158,6 +164,9 @@ export function Home() {
               <button className="btn btn-primary h-11 px-5 text-sm" onClick={() => setUI({ wizardOpen: true })}>
                 Start a new event <ArrowRight size={14} />
               </button>
+              <button className="btn h-11 px-5 text-sm" onClick={() => setUI({ venuesOpen: true })}>
+                <Building2 size={14} /> Find a venue
+              </button>
               {projects.length > 0 && (
                 <button className="btn h-11 px-5 text-sm" onClick={() => open(projects[0].p)}>
                   Continue “{projects[0].e.name}”
@@ -170,13 +179,14 @@ export function Home() {
           </div>
         </section>
 
-        <section className="grid grid-cols-6 gap-2 pb-12">
+        <section className="grid grid-cols-7 gap-2 pb-12">
           {(
             [
               [<Layers size={15} key="i" />, 'Ground plan', 'Zones, capacity, sightlines'],
               [<Box size={15} key="i" />, 'Stage', 'Decks, risers, runways'],
               [<Ruler size={15} key="i" />, 'Truss & rigging', 'Live kg per hoist, auto-rig'],
               [<MonitorPlay size={15} key="i" />, 'LED screens', 'Pixels, data, 3-phase power'],
+              [<Users size={15} key="i" />, 'Seating', 'Tables, guests, meals'],
               [<Box size={15} key="i" />, '3D visualizer', 'Night show, renders, video'],
               [<FileText size={15} key="i" />, 'Deliver', 'Client link, PDF, DXF, XML'],
             ] as const

@@ -184,3 +184,18 @@ describe('Cloud sync helpers', () => {
     expect(shareCodeFromPath()).toBeNull()
   })
 })
+
+describe('Share links and seating', () => {
+  it('include tables but never the guest list', async () => {
+    const { parseGuests } = await import('../seating')
+    const p = generateProject(TEMPLATES.find((t) => t.name === 'Wedding Sangeet')!)
+    p.guests = parseGuests('Private Person, Family, Veg')
+    const link = shareLink(p)
+    g.location.hash = link.slice(link.indexOf('#'))
+    const back = readShareHash()!
+    expect(back.tables.length).toBe(p.tables.length)
+    expect(back.guests).toEqual([])
+    expect(link.length).toBeLessThan(2900)
+    g.location.hash = ''
+  })
+})

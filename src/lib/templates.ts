@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid'
 import type { Deck, Fixture, GroundItem, Hoist, Project, Screen, Truss } from '../types'
 import { suggestPitch } from './panels'
 import { autoRig } from './calc'
+import { autoLayout } from './seating'
 
 export const EVENT_TYPES = ['College Fest', 'Open-Air Concert', 'DJ Night', 'Wedding Sangeet', 'Corporate Keynote', 'Fashion Runway', 'Stand-up Comedy'] as const
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -19,7 +20,7 @@ export const TEMPLATES: (WizardInput & { blurb: string })[] = [
   { name: 'College Fest Main Stage', eventType: 'College Fest', audience: 3000, venueW: 60, venueL: 80, outdoor: true, blurb: 'Big outdoor end-stage, centre LED + side screens, roof truss.' },
   { name: 'Open-Air Concert', eventType: 'Open-Air Concert', audience: 8000, venueW: 90, venueL: 120, outdoor: true, blurb: 'Large festival stage with wide LED and flown PA.' },
   { name: 'EDM / DJ Night', eventType: 'DJ Night', audience: 1500, venueW: 40, venueL: 50, outdoor: true, blurb: 'DJ riser, curved LED, dense lighting rig.' },
-  { name: 'Wedding Sangeet', eventType: 'Wedding Sangeet', audience: 400, venueW: 30, venueL: 40, outdoor: false, blurb: 'Seated lawn or banquet, performance stage, one LED.' },
+  { name: 'Wedding Sangeet', eventType: 'Wedding Sangeet', audience: 400, venueW: 36, venueL: 50, outdoor: false, blurb: 'Seated lawn or banquet, performance stage, one LED.' },
   { name: 'Corporate Keynote', eventType: 'Corporate Keynote', audience: 600, venueW: 30, venueL: 45, outdoor: false, blurb: 'Theatre seating, low stage, 16:9 centre + IMAG screens.' },
   { name: 'Fashion Runway', eventType: 'Fashion Runway', audience: 300, venueW: 25, venueL: 40, outdoor: false, blurb: 'Catwalk thrust with seated sides and back LED.' },
   { name: 'Stand-up Comedy', eventType: 'Stand-up Comedy', audience: 250, venueW: 20, venueL: 28, outdoor: false, blurb: 'Intimate seated room, small stage and screen.' },
@@ -42,6 +43,8 @@ export function emptyProject(name = 'Untitled event'): Project {
     truss: [],
     hoists: [],
     fixtures: [],
+    tables: [],
+    guests: [],
     customPanels: [],
     processor: { name: 'Generic 1G sending card', portPx: 655360 },
     circuitAmps: 16,
@@ -176,5 +179,14 @@ export function generateProject(inp: WizardInput): Project {
   if (a >= 4000 && inp.venueL > 70) add('delay', inp.venueW / 2 - 1, front + 40, 2, 2, 'Delay tower')
   p.ground = g
   p.hoists = autoRig(p)
+  // Dinner and conference formats start with real tables or rows in the seating zone.
+  const style = inp.eventType === 'Wedding Sangeet' ? 'banquet' : inp.eventType === 'Corporate Keynote' ? 'theatre' : inp.eventType === 'Stand-up Comedy' ? 'cabaret' : null
+  const zone = g.find((x) => x.kind === 'seating')
+  if (style && zone) {
+    const vip = g.find((x) => x.kind === 'vip')
+    const top = vip ? vip.y : zone.y
+    const area = { x: zone.x, y: top, w: zone.w, l: zone.y + zone.h - top }
+    p.tables = autoLayout({ style, guests: a, area, aisle: 2 }).tables
+  }
   return p
 }

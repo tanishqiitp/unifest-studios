@@ -276,6 +276,9 @@ export function liteProject(p: Project): Project {
     truss: short(p.truss, 't'),
     hoists: short(p.hoists, 'h'),
     fixtures: short(p.fixtures, 'f'),
+    // Client links show the room layout but never the guest list.
+    tables: short(p.tables ?? [], 'b'),
+    guests: [],
   }
   for (const k of LISTS) (lite[k] as unknown as Record<string, unknown>[]) = (lite[k] as unknown as Record<string, unknown>[]).map(dropDefaults)
   return JSON.parse(JSON.stringify(lite, (_k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)))
@@ -286,7 +289,7 @@ export function shareLink(p: Project) {
 }
 
 // Share links leave out zero, false, empty-text and empty-list fields on list items; reading puts them back.
-const LISTS = ['screens', 'ground', 'decks', 'truss', 'hoists', 'fixtures'] as const
+const LISTS = ['screens', 'ground', 'decks', 'truss', 'hoists', 'fixtures', 'tables'] as const
 const ITEM_DEFAULTS: Record<(typeof LISTS)[number], Record<string, unknown>> = {
   screens: { virtual: [], x: 0, y: 0, z: 0, rotation: 0, curveDeg: 0, shape: 'flat' },
   ground: { x: 0, y: 0, rotation: 0, label: '' },
@@ -294,6 +297,7 @@ const ITEM_DEFAULTS: Record<(typeof LISTS)[number], Record<string, unknown>> = {
   truss: { x1: 0, y1: 0, x2: 0, y2: 0, legs: false },
   hoists: { x: 0, y: 0 },
   fixtures: { x: 0, y: 0, z: 0 },
+  tables: { x: 0, y: 0, rotation: 0, seats: 0, label: '' },
 }
 
 function dropDefaults(o: Record<string, unknown>) {
@@ -308,6 +312,7 @@ function dropDefaults(o: Record<string, unknown>) {
 
 export function restoreDefaults(p: Project): Project {
   for (const k of LISTS) (p[k] as unknown as Record<string, unknown>[]) = ((p[k] ?? []) as unknown as Record<string, unknown>[]).map((o) => ({ ...ITEM_DEFAULTS[k], ...o }))
+  p.guests ??= []
   return p
 }
 

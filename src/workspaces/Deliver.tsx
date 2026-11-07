@@ -5,6 +5,7 @@ import { useStore } from '../store'
 import { fmt, pixelLayout, totals } from '../lib/calc'
 import { download, exportDXF, exportPixelMap, exportProject, exportResolume, pixelMapCanvas, shareLink, slug } from '../lib/export/files'
 import { equipmentCSV } from '../lib/export/equipment'
+import { seatingCSV } from '../lib/seating'
 import { cloudEnabled, ensureShare, shortLink, useAuth } from '../lib/cloud'
 
 export function DeliverWorkspace() {
@@ -111,6 +112,7 @@ export function DeliverWorkspace() {
             <Row icon={<FileCode2 size={15} />} title="Resolume Arena 7" sub="Advanced Output XML preset (beta: check in Arena)" action="XML" onClick={() => run('Resolume 7 XML', () => exportResolume(project, 7))} disabled={!pl.width} />
             <Row icon={<FileCode2 size={15} />} title="Resolume Arena 6" sub="XML preset compatible with v6 (beta)" action="XML" onClick={() => run('Resolume 6 XML', () => exportResolume(project, 6))} disabled={!pl.width} />
             <Row icon={<FileSpreadsheet size={15} />} title="Equipment list" sub="Quantities, weights and power (opens in Excel)" action="CSV" onClick={() => run('Equipment CSV', () => download(`${slug(project)}-equipment.csv`, '﻿' + equipmentCSV(project), 'text/csv'))} />
+            <Row icon={<FileSpreadsheet size={15} />} title="Seating chart" sub={project.guests.length ? `${project.guests.length} guests by table, with meals (opens in Excel)` : 'Add guests in the Seating workspace first'} action="CSV" onClick={() => run('Seating chart', () => download(`${slug(project)}-seating.csv`, '﻿' + seatingCSV(project), 'text/csv'))} disabled={!project.guests.length} />
             <Row icon={<FileJson size={15} />} title="Project file (.unifest)" sub="Editable by your team" action="Save" onClick={() => run('Project file', () => exportProject(project))} />
           </div>
         </div>

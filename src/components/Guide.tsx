@@ -24,6 +24,11 @@ const GUIDES: Partial<Record<Workspace, { title: string; steps: string[]; next?:
   led: {
     title: 'Design the LED screens',
     steps: ['Add a screen and size it in metres, pixels or panels.', 'Use the + handles to add screens alongside, and Live symmetry for side screens.', 'Switch to Pro (top bar) for data cabling and 3-phase power.'],
+    next: ['seating', 'Plan seating'],
+  },
+  seating: {
+    title: 'Tables and seating',
+    steps: ['Pick a style (banquet, theatre, classroom…) and press Generate layout, or add tables one by one.', 'Paste your guest list, with meal and group if you have them.', 'Press Auto-seat: VIPs go nearest the stage and groups sit together. Fine-tune from each table.'],
     next: ['viz', 'See it in 3D'],
   },
   viz: {

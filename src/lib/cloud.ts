@@ -126,3 +126,68 @@ export async function fetchShare(code: string): Promise<Project | null> {
   if (error || !data) return null
   return restoreDefaults(data as Project)
 }
+
+// ---------- venue library ----------
+
+export interface VenueRoom {
+  name: string
+  w: number // metres across
+  l: number // metres deep
+  h?: number // ceiling height
+  theatre?: number
+  banquet?: number
+  standing?: number
+}
+
+export interface Venue {
+  id: string
+  name: string
+  kind: string
+  city: string
+  state: string
+  country: string
+  address: string
+  website: string
+  notes: string
+  indoor: boolean
+  rooms: VenueRoom[]
+  verified: boolean
+  created_by: string | null
+}
+
+export const VENUE_KINDS: { id: string; name: string }[] = [
+  { id: 'banquet', name: 'Banquet hall' },
+  { id: 'hotel', name: 'Hotel ballroom' },
+  { id: 'convention', name: 'Convention centre' },
+  { id: 'auditorium', name: 'Auditorium' },
+  { id: 'open-ground', name: 'Open ground' },
+  { id: 'lawn', name: 'Lawn / garden' },
+  { id: 'stadium', name: 'Stadium / arena' },
+  { id: 'resort', name: 'Resort / farmhouse' },
+  { id: 'college', name: 'College campus' },
+  { id: 'club', name: 'Club / lounge' },
+  { id: 'other', name: 'Other' },
+]
+
+export async function searchVenues(q: string): Promise<Venue[]> {
+  // Keep only letters, digits and spaces so the text is safe inside the filter expression.
+  const term = q.replace(/[^\p{L}\p{N} ]/gu, ' ').trim().slice(0, 60)
+  let query = need().from('venues').select('*').order('verified', { ascending: false }).order('name').limit(40)
+  if (term) query = query.or(`name.ilike.%${term}%,city.ilike.%${term}%,state.ilike.%${term}%,address.ilike.%${term}%`)
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+  return (data ?? []) as Venue[]
+}
+
+export async function saveVenue(v: Omit<Venue, 'id' | 'verified' | 'created_by'> & { id?: string }) {
+  const db = need()
+  const row = { ...v, rooms: v.rooms.filter((r) => r.name.trim() && r.w > 0 && r.l > 0), updated_at: new Date().toISOString() }
+  const res = v.id ? await db.from('venues').update(row).eq('id', v.id).select().single() : await db.from('venues').insert(row).select().single()
+  if (res.error) throw new Error(res.error.message)
+  return res.data as Venue
+}
+
+export async function deleteVenue(id: string) {
+  const { error } = await need().from('venues').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}

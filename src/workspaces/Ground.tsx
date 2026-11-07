@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import { Copy, Trash2, Upload } from 'lucide-react'
+import { Building2, Copy, Trash2, Upload } from 'lucide-react'
 import { useStore } from '../store'
 import type { GroundItem } from '../types'
 import { PlanCanvas } from '../components/PlanCanvas'
@@ -46,6 +46,9 @@ export function GroundWorkspace() {
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
         <Section title="Venue">
+          <button className="btn w-full justify-center" onClick={() => useStore.getState().setUI({ venuesOpen: true })}>
+            <Building2 size={13} /> Pick from venue library
+          </button>
           <div className="grid grid-cols-2 gap-2">
             <Num label="Width" value={project.venue.w} onChange={(w) => mutate((p) => void (p.venue.w = w))} unit="m" step={1} min={5} />
             <Num label="Length" value={project.venue.l} onChange={(l) => mutate((p) => void (p.venue.l = l))} unit="m" step={1} min={5} />

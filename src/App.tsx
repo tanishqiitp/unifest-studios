@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ChevronDown, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { AlertTriangle, Armchair, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -13,8 +13,11 @@ import { GroundWorkspace } from './workspaces/Ground'
 import { StageWorkspace } from './workspaces/Stage'
 import { TrussWorkspace } from './workspaces/Truss'
 import { DeliverWorkspace } from './workspaces/Deliver'
+import { SeatingWorkspace } from './workspaces/Seating'
+import { seatCount } from './lib/seating'
 import { Check, Modal, Num, Seg, Sel, Txt } from './components/ui'
 import { Home } from './components/Home'
+import { VenueFinder } from './components/VenueFinder'
 import { Guide } from './components/Guide'
 import { nanoid } from 'nanoid'
 
@@ -31,13 +34,14 @@ function Loading3D() {
   )
 }
 
-const TABS: { id: Workspace; label: string; short: string; kicker: string }[] = [
-  { id: 'ground', label: 'Ground Plan', short: 'Ground', kicker: '01' },
-  { id: 'stage', label: 'Stage', short: 'Stage', kicker: '02' },
-  { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '03' },
-  { id: 'led', label: 'LED Screens', short: 'LED', kicker: '04' },
-  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '05' },
-  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '06' },
+const TABS: { id: Workspace; label: string; short: string; kicker: string; icon: typeof MapIcon; tip: string }[] = [
+  { id: 'ground', label: 'Ground Plan', short: 'Ground', kicker: '01', icon: MapIcon, tip: 'Venue size, crowd areas, exits and facilities' },
+  { id: 'stage', label: 'Stage', short: 'Stage', kicker: '02', icon: Square, tip: 'Build the stage from decks, risers and runways' },
+  { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '03', icon: Spline, tip: 'Truss, hoists, lights and speakers, with live weights' },
+  { id: 'led', label: 'LED Screens', short: 'LED', kicker: '04', icon: MonitorPlay, tip: 'Screen sizes, pixels, cabling and power' },
+  { id: 'seating', label: 'Seating', short: 'Seats', kicker: '05', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
+  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '06', icon: Box, tip: 'See everything in 3D, render images and videos' },
+  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '07', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
 ]
 
 export default function App() {
@@ -108,6 +112,7 @@ function Studio() {
     return (
       <>
         <Home />
+        {ui.venuesOpen && <Venues />}
         {ui.wizardOpen && <Wizard />}
         {ui.toast && <Toast msg={ui.toast} />}
       </>
@@ -120,17 +125,19 @@ function Studio() {
         {ui.workspace === 'stage' && <StageWorkspace />}
         {ui.workspace === 'truss' && <TrussWorkspace />}
         {ui.workspace === 'led' && <LedWorkspace />}
+        {ui.workspace === 'seating' && <SeatingWorkspace />}
         {ui.workspace === 'viz' && (
           <Suspense fallback={<Loading3D />}>
             <Viz3DWorkspace />
           </Suspense>
         )}
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
-        {['ground', 'stage', 'truss', 'led'].includes(ui.workspace) && <Hud />}
-        {['ground', 'stage', 'truss', 'led'].includes(ui.workspace) && <ToolRail />}
+        {['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <Hud />}
+        {['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <ToolRail />}
         <Guide />
       </div>
       <WarningsBar />
+      {ui.venuesOpen && <Venues />}
       {ui.wizardOpen && <Wizard />}
       {ui.shortcutsOpen && <Shortcuts />}
       {ui.toast && <Toast msg={ui.toast} />}
@@ -143,6 +150,30 @@ function Toast({ msg }: { msg: string }) {
     <div role="status" className="fixed bottom-14 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-white text-black text-xs font-medium px-4 py-2 fade-in shadow-2xl">
       {msg}
     </div>
+  )
+}
+
+// From the home screen a picked space starts a new event; inside a project it resizes the venue.
+function Venues() {
+  const home = useStore((s) => s.ui.home)
+  const { setUI, mutate, notify } = useStore.getState()
+  return (
+    <VenueFinder
+      onClose={() => setUI({ venuesOpen: false })}
+      onPick={(v, r) => {
+        const cap = r.banquet || r.theatre || r.standing
+        if (home) {
+          setUI({ venuesOpen: false, wizardOpen: true, wizardPrefill: { name: `${v.name} event`, venueW: r.w, venueL: r.l, outdoor: !v.indoor, ...(cap ? { audience: cap } : {}) } })
+          return
+        }
+        mutate((p) => {
+          p.venue.w = r.w
+          p.venue.l = r.l
+        })
+        setUI({ venuesOpen: false })
+        notify(`Venue set to ${v.name} · ${r.name}: ${r.w} × ${r.l} m`)
+      }}
+    />
   )
 }
 
@@ -187,9 +218,10 @@ function TopBar() {
           <button
             key={t.id}
             onClick={() => setUI({ workspace: t.id, tool: 'select' })}
+            title={`${t.tip} (${TABS.indexOf(t) + 1})`}
             className={`h-8 px-2.5 xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
           >
-            <span className={`mono text-[9px] hidden xl:inline ${ui.workspace === t.id ? 'text-black/50' : 'text-mute'}`}>{t.kicker}</span>
+            <t.icon size={13} className={ui.workspace === t.id ? '' : 'text-mute'} />
             <span className="hidden xl:inline">{t.label}</span>
             <span className="xl:hidden">{t.short}</span>
           </button>
@@ -295,9 +327,10 @@ function Hud() {
     ['Weight', `${Math.round(t.weight).toLocaleString('en-IN')} kg`],
     ['Power', `${fmt(t.powerKw, 1)} kW`],
     ['Capacity', `${t.capacity.toLocaleString('en-IN')}`, true],
+    ...(project.tables.length ? ([['Seats', seatCount(project).toLocaleString('en-IN')]] as [string, string][]) : []),
   ]
   const ws = useStore((s) => s.ui.workspace)
-  const left = ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' ? 'left-[272px]' : 'left-4'
+  const left = ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' ? 'left-[272px]' : 'left-4'
   return (
     <div className={`absolute top-4 ${left} z-10 glass rounded-xl flex divide-x divide-line pointer-events-none`}>
       {items.map(([k, v, wide]) => (
@@ -380,15 +413,16 @@ function WarningsBar() {
 
 function Wizard() {
   const { setUI, setProject, notify } = useStore.getState()
-  const [inp, setInp] = useState<WizardInput>({ name: 'My event', eventType: 'College Fest', audience: 1500, venueW: 50, venueL: 70, outdoor: true })
+  const prefill = useStore((s) => s.ui.wizardPrefill)
+  const [inp, setInp] = useState<WizardInput>(() => ({ name: 'My event', eventType: 'College Fest', audience: 1500, venueW: 50, venueL: 70, outdoor: true, ...prefill }))
   const create = (w: WizardInput) => {
     setProject(generateProject(w))
-    setUI({ wizardOpen: false, home: false, workspace: 'ground' })
+    setUI({ wizardOpen: false, home: false, workspace: 'ground', wizardPrefill: null })
     useStore.temporal.getState().clear()
     notify('Starter layout generated. Every part is editable.')
   }
   return (
-    <Modal title="New event" onClose={() => setUI({ wizardOpen: false })} wide>
+    <Modal title="New event" onClose={() => setUI({ wizardOpen: false, wizardPrefill: null })} wide>
       <div className="grid grid-cols-5 gap-8">
         <div className="col-span-2 space-y-3">
           <div className="label">Tell us about your event</div>
@@ -447,7 +481,7 @@ function Shortcuts() {
     ['Ctrl+D', 'Duplicate selected screen'],
     ['Delete', 'Delete selection'],
     ['Ctrl+S', 'Save'],
-    ['1 – 6', 'Switch workspace'],
+    ['1 – 7', 'Switch workspace'],
   ]
   return (
     <Modal title="Keyboard shortcuts" onClose={() => setUI({ shortcutsOpen: false })}>
@@ -491,7 +525,7 @@ function useShortcuts() {
       if (k === 'b' && ui.workspace === 'led') setUI({ tool: ui.tool === 'paint' ? 'select' : 'paint' })
       if (k === '?') setUI({ shortcutsOpen: true })
       if (k === 'escape') setUI({ tool: 'select' })
-      if (/^[1-6]$/.test(k)) setUI({ workspace: TABS[Number(k) - 1].id, tool: 'select' })
+      if (/^[1-7]$/.test(k)) setUI({ workspace: TABS[Number(k) - 1].id, tool: 'select' })
       if ((k === 'delete' || k === 'backspace') && ui.selection) {
         const { kind, id } = ui.selection
         mutate((p) => {
@@ -500,6 +534,10 @@ function useShortcuts() {
           if (kind === 'deck') p.decks = p.decks.filter((d) => d.id !== id)
           if (kind === 'truss') p.truss = p.truss.filter((t) => t.id !== id)
           if (kind === 'hoist') p.hoists = p.hoists.filter((h) => h.id !== id)
+          if (kind === 'table') {
+            p.tables = p.tables.filter((t) => t.id !== id)
+            p.guests.forEach((g) => g.tableId === id && (g.tableId = undefined))
+          }
         })
         select(null)
       }

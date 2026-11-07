@@ -27,11 +27,19 @@ Share links and QR codes only work for other people once the app is hosted. It i
 - `.github/workflows/keep-awake.yml` pings the database every 3 days so the free project never pauses.
 - Supabase's built-in email sender only allows a few sign-in emails per hour. Before launch, connect a free SMTP service (for example Resend) under Authentication → SMTP Settings.
 
+## Venue library
+- Search venues by name, city or area and see every space with its dimensions, ceiling height and capacities. "Use this space" sets the venue size (or starts a new event from the home screen).
+- Signed-in users can add venues; anyone can search. Community entries are marked unverified until the team verifies them (only possible with the service role).
+- Table `venues` in `supabase/migrations/20261108100000_venues.sql`.
+
+## 3D view controls
+The View panel in the 3D workspace turns, tilts and zooms the camera, shows a compass and angle readout, and jumps to Top, Front, Left, Right and Back views. Arrow keys turn and tilt (Shift for 45° steps), + and − zoom.
+
 ## Getting around
 - The **home screen** lists your saved projects (open, open in 3D, duplicate, delete) and the templates. Click the logo to return to it.
 - Each workspace shows a short **guide** with a button to the next step. The **?** button in the top bar brings it back.
 
-## Workspaces (keys 1–6)
+## Workspaces (keys 1–7)
 1. **Ground Plan**:
    - Venue size and site-image tracing.
    - Zones: crowd, seating, VIP, FOH, barricade, exits, delay towers and more.
@@ -57,7 +65,12 @@ Share links and QR codes only work for other people once the app is hosted. It i
    - Click any screen, truss or the stage for its specs.
    - Play your own video or image on the screens.
    - **Render** a high-resolution PNG (up to 4K wide) and record a **walkthrough video**: 16:9 (1920×1080) or 9:16 social reel (1080×1920), MP4 in Chrome/Edge, WebM elsewhere.
-6. **Deliver**:
+6. **Seating**:
+   - Tables and furniture: 5 ft and 6 ft rounds, banquet, cocktail, sweetheart, chair rows, classroom, lounge, dance floor, buffet, bar.
+   - Automatic layouts (banquet, theatre, classroom, cabaret, cocktail) for any guest count, with a centre aisle and standard spacing.
+   - Guest list pasted from Excel or Sheets (name, group, meal, VIP), auto-seat (VIPs nearest the stage, groups together), meal counts, seating chart CSV.
+   - Tables, chairs and seated guests appear in 3D. Client share links include the layout but never guest names.
+7. **Deliver**:
    - Client 3D share link with QR and WhatsApp share.
    - Technical PDF pack, 1:1 DXF and native pixel-map PNG.
    - Resolume 6/7 XML (beta), equipment CSV and the `.unifest` project file.

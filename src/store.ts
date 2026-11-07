@@ -6,8 +6,9 @@ import { generateProject, TEMPLATES } from './lib/templates'
 import { loadCurrent, writeProject } from './lib/library'
 import { cloudEnabled, pushProject, useAuth } from './lib/cloud'
 import { nanoid } from 'nanoid'
+import { withSeating } from './lib/seating'
 
-export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture'; id: string } | null
+export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture' | 'table'; id: string } | null
 export type LedOverlay = 'none' | 'data' | 'power'
 export type Tool = 'select' | 'pan' | 'paint' | 'measure' | 'draw-truss' | 'hoist'
 
@@ -22,6 +23,9 @@ interface UI {
   shortcutsOpen: boolean
   home: boolean
   guideOpen: boolean
+  venuesOpen: boolean
+  // Values the new-event wizard starts with, e.g. a room picked from the venue library.
+  wizardPrefill: { name?: string; venueW?: number; venueL?: number; audience?: number; outdoor?: boolean } | null
   warningsOpen: boolean
   toast: string | null
 }
@@ -37,7 +41,7 @@ interface State {
 }
 
 function loadInitial(): Project {
-  return loadCurrent() ?? { ...generateProject(TEMPLATES[0]), id: nanoid(10) }
+  return withSeating(loadCurrent() ?? { ...generateProject(TEMPLATES[0]), id: nanoid(10) })
 }
 
 // Live symmetry: mirrored screens copy their source and flip across the venue centre line.
@@ -75,6 +79,8 @@ export const useStore = create<State>()(
         shortcutsOpen: false,
         home: true,
         guideOpen: false,
+        venuesOpen: false,
+        wizardPrefill: null,
         warningsOpen: false,
         toast: null,
       },
@@ -87,6 +93,7 @@ export const useStore = create<State>()(
       },
       setProject: (p) => {
         if (!p.id) p.id = nanoid(10)
+        withSeating(p)
         syncMirrors(p)
         set({ project: p, ui: { ...get().ui, selection: null } })
       },

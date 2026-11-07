@@ -7,11 +7,12 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import type { OrbitControls as OrbitImpl } from 'three-stdlib'
-import { Camera, Clapperboard, Eye, Film, Orbit, Tag, Users, Waves, X } from 'lucide-react'
+import { Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Orbit, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useStore } from '../store'
-import type { Fixture, GroundItem, Project, Screen, Truss } from '../types'
+import type { Fixture, GroundItem, Project, Screen, Table, Truss } from '../types'
 import { fmt, screenColumns, screenStats, stageBounds, TRUSS_INFO, trussLength } from '../lib/calc'
 import { GROUND_LABELS } from '../lib/export/labels'
+import { CHAIR, isSeated, seatPositions } from '../lib/seating'
 
 RectAreaLightUniformsLib.init()
 
@@ -19,6 +20,8 @@ type Preset = 'audience' | 'last' | 'foh' | 'stage' | 'drone' | 'side'
 export type Look = 'show' | 'day' | 'tech'
 export type Palette = 'white' | 'warm' | 'ice' | 'duo' | 'rainbow'
 type RecordReq = { aspect: '16:9' | '9:16'; seconds: number; id: number }
+export type ViewCmd = { kind: 'rotate' | 'tilt' | 'zoom' | 'set-az' | 'set-el' | 'view' | 'reset'; value: number | string; n: number }
+export type Angles = { az: number; el: number }
 type Info = { title: string; lines: string[] }
 
 const PRESETS: [Preset, string][] = [
@@ -58,6 +61,36 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [recProgress, setRecProgress] = useState(0)
   const [recMenu, setRecMenu] = useState(false)
   const [info, setInfo] = useState<Info | null>(null)
+  const [viewCmd, setViewCmd] = useState<ViewCmd | null>(null)
+  const [angles, setAngles] = useState<Angles>({ az: 0, el: 20 })
+  const view = (kind: ViewCmd['kind'], value: number | string = 0) => {
+    setShowcase(false)
+    setViewCmd({ kind, value, n: Date.now() + Math.random() })
+  }
+  // Arrow keys turn and tilt the view; + and - zoom.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || e.ctrlKey || e.metaKey) return
+      const step = e.shiftKey ? 45 : 15
+      const map: Record<string, [ViewCmd['kind'], number]> = {
+        ArrowLeft: ['rotate', -THREE.MathUtils.degToRad(step)],
+        ArrowRight: ['rotate', THREE.MathUtils.degToRad(step)],
+        ArrowUp: ['tilt', THREE.MathUtils.degToRad(10)],
+        ArrowDown: ['tilt', -THREE.MathUtils.degToRad(10)],
+        '+': ['zoom', 0.8],
+        '=': ['zoom', 0.8],
+        '-': ['zoom', 1.25],
+      }
+      const m = map[e.key]
+      if (!m) return
+      e.preventDefault()
+      setShowcase(false)
+      setViewCmd({ kind: m[0], value: m[1], n: Date.now() + Math.random() })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const fileRef = useRef<HTMLInputElement>(null)
   const notify = useStore((s) => s.notify)
 
@@ -99,6 +132,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
             notify(ok ? 'Walkthrough video downloaded' : 'This browser cannot record video. Try Chrome or Edge.')
           }}
           onShowcaseStop={() => setShowcase(false)}
+          viewCmd={viewCmd}
+          onAngles={setAngles}
         />
       </Canvas>
 
@@ -207,8 +242,10 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
         )}
       </div>
 
+      <ViewPad angles={angles} view={view} compact={!!compact} />
+
       {info && (
-        <div className="absolute right-4 top-20 z-10 glass rounded-xl p-4 w-64 fade-in">
+        <div className="absolute right-[176px] top-20 z-10 glass rounded-xl p-4 w-64 fade-in">
           <div className="flex items-start justify-between gap-2">
             <div className="text-sm font-semibold">{info.title}</div>
             <button className="text-mute hover:text-white" onClick={() => setInfo(null)} aria-label="Close">
@@ -247,6 +284,94 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   )
 }
 
+// ---------------------------------------------------------------- view controls
+
+const VIEWS = [
+  ['top', 'Top'],
+  ['front', 'Front'],
+  ['left', 'Left'],
+  ['right', 'Right'],
+  ['back', 'Back'],
+] as const
+
+function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd['kind'], v?: number | string) => void; compact: boolean }) {
+  const [open, setOpen] = useState(!compact)
+  const deg = THREE.MathUtils.degToRad
+  const btn = 'btn btn-icon h-8 w-8'
+  const pos = compact ? 'top-28' : 'top-1/2 -translate-y-1/2'
+  if (!open)
+    return (
+      <button className={`absolute right-4 ${pos} z-10 glass rounded-xl btn h-9`} onClick={() => setOpen(true)} title="Turn and tilt the view">
+        <Compass size={14} /> View
+      </button>
+    )
+  return (
+    <div className={`absolute right-4 ${pos} z-10 glass rounded-xl p-2 w-[156px] fade-in select-none`} aria-label="View controls">
+      <div className="flex items-center justify-between px-1 mb-1.5">
+        <span className="label">View angle</span>
+        <button className="text-mute hover:text-white" onClick={() => setOpen(false)} aria-label="Hide view controls">
+          <X size={12} />
+        </button>
+      </div>
+      {/* Compass: the needle points from the stage towards the camera (F = front of house) */}
+      <div className="relative mx-auto h-[72px] w-[72px] rounded-full border border-line-hi">
+        {['F', 'R', 'B', 'L'].map((l, i) => (
+          <span key={l} className="absolute text-[9px] mono text-mute" style={{ left: `${50 + Math.sin((i * Math.PI) / 2) * 38}%`, top: `${50 + Math.cos((i * Math.PI) / 2) * 38}%`, transform: 'translate(-50%,-50%)' }}>
+            {l}
+          </span>
+        ))}
+        <div className="absolute left-1/2 top-1/2 h-[26px] w-[2px] origin-top rounded bg-white" style={{ transform: `translateX(-50%) rotate(${-angles.az}deg)` }} />
+        <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+      </div>
+      <div className="grid grid-cols-3 gap-1 mt-2 justify-items-center">
+        <span />
+        <button className={btn} title="Look from higher (↑)" onClick={() => view('tilt', deg(10))}>
+          <ChevronUp size={14} />
+        </button>
+        <span />
+        <button className={btn} title="Turn left (←)" onClick={() => view('rotate', -deg(15))}>
+          <RotateCcw size={14} />
+        </button>
+        <button className={btn} title="Back to the chosen camera" onClick={() => view('reset')}>
+          <Crosshair size={14} />
+        </button>
+        <button className={btn} title="Turn right (→)" onClick={() => view('rotate', deg(15))}>
+          <RotateCw size={14} />
+        </button>
+        <button className={btn} title="Zoom out (−)" onClick={() => view('zoom', 1.25)}>
+          <ZoomOut size={14} />
+        </button>
+        <button className={btn} title="Look from lower (↓)" onClick={() => view('tilt', -deg(10))}>
+          <ChevronDown size={14} />
+        </button>
+        <button className={btn} title="Zoom in (+)" onClick={() => view('zoom', 0.8)}>
+          <ZoomIn size={14} />
+        </button>
+      </div>
+      <label className="block mt-2 px-1">
+        <span className="flex justify-between text-[10px] text-mute">
+          Turn <span className="mono text-white">{angles.az}°</span>
+        </span>
+        <input type="range" min={0} max={359} value={angles.az} onChange={(e) => view('set-az', Number(e.target.value))} className="w-full accent-white" aria-label="Turn angle" />
+      </label>
+      <label className="block px-1">
+        <span className="flex justify-between text-[10px] text-mute">
+          Height <span className="mono text-white">{angles.el}°</span>
+        </span>
+        <input type="range" min={2} max={88} value={angles.el} onChange={(e) => view('set-el', Number(e.target.value))} className="w-full accent-white" aria-label="Viewing height angle" />
+      </label>
+      <div className="grid grid-cols-3 gap-1 mt-1.5">
+        {VIEWS.map(([k, l]) => (
+          <button key={k} className="btn h-7 px-0 justify-center text-[9px]" onClick={() => view('view', k)} title={`${l} view`}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {!compact && <p className="text-[9px] mt-1.5 px-1 leading-snug text-mute">Arrow keys turn and tilt · Shift for 45°</p>}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- scene
 
 interface SceneProps {
@@ -267,6 +392,8 @@ interface SceneProps {
   onRecProgress: (p: number) => void
   onRecDone: (ok: boolean) => void
   onShowcaseStop: () => void
+  viewCmd: ViewCmd | null
+  onAngles: (a: Angles) => void
 }
 
 function focusOf(project: Project) {
@@ -284,7 +411,8 @@ function Scene(props: SceneProps) {
   const { camera, gl, scene, size, setSize, setDpr, viewport } = useThree()
   const f = useMemo(() => focusOf(project), [project])
   const { W, L, sb } = f
-  const fly = useRef<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>(null)
+  // A camera move in progress: straight to a point, or around the target along a sphere.
+  const fly = useRef<{ pos: THREE.Vector3; target: THREE.Vector3; sph?: THREE.Spherical } | null>(null)
   const show = look === 'show'
 
   useEffect(() => {
@@ -348,16 +476,71 @@ function Scene(props: SceneProps) {
     cam.updateProjectionMatrix()
   }, [camera, size.width, size.height])
 
-  useFrame((_, dt) => {
+  // Manual view controls: rotate, tilt, zoom and fixed views, all relative to the current target.
+  useEffect(() => {
+    const cmd = props.viewCmd
+    const ctl = controls.current
+    if (!cmd || !ctl) return
+    if (cmd.kind === 'reset') {
+      fly.current = cameraFor(preset)
+      return
+    }
+    const t = ctl.target.clone()
+    const sph = new THREE.Spherical().setFromVector3(camera.position.clone().sub(t))
+    const v = Number(cmd.value)
+    const minPhi = 0.02
+    const maxPhi = Math.PI / 2 - 0.02
+    if (cmd.kind === 'rotate') sph.theta += v
+    if (cmd.kind === 'tilt') sph.phi -= v
+    if (cmd.kind === 'zoom') sph.radius *= v
+    if (cmd.kind === 'set-az') sph.theta = THREE.MathUtils.degToRad(v)
+    if (cmd.kind === 'set-el') sph.phi = Math.PI / 2 - THREE.MathUtils.degToRad(v)
+    if (cmd.kind === 'view') {
+      const views: Record<string, [number, number]> = { top: [0, minPhi], front: [0, 1.3], back: [Math.PI, 1.3], left: [-Math.PI / 2, 1.3], right: [Math.PI / 2, 1.3] }
+      const [theta, phi] = views[String(cmd.value)] ?? views.front
+      sph.theta = theta
+      sph.phi = phi
+      if (cmd.value === 'top') {
+        // Look straight down on the middle of the venue.
+        t.set(W / 2, 0, L / 2)
+        sph.radius = Math.max(W, L) * 1.15
+      }
+    }
+    sph.phi = THREE.MathUtils.clamp(sph.phi, minPhi, maxPhi)
+    sph.radius = THREE.MathUtils.clamp(sph.radius, 2, Math.max(W, L) * 3)
+    fly.current = { pos: new THREE.Vector3().setFromSpherical(sph).add(t), target: t, sph }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.viewCmd])
+
+  const tmpSph = useMemo(() => new THREE.Spherical(), [])
+  const lastAngles = useRef({ az: -1, el: -1, at: 0 })
+  useFrame(({ clock }, dt) => {
     const ctl = controls.current
     if (!ctl || rec) return
     if (fly.current) {
       const k = 1 - Math.exp(-dt * 3.2)
-      camera.position.lerp(fly.current.pos, k)
       ctl.target.lerp(fly.current.target, k)
-      if (camera.position.distanceTo(fly.current.pos) < 0.05) fly.current = null
+      if (fly.current.sph) {
+        // Travel around the target, taking the short way round.
+        const cur = tmpSph.setFromVector3(camera.position.clone().sub(ctl.target))
+        const goal = fly.current.sph
+        const dTheta = Math.atan2(Math.sin(goal.theta - cur.theta), Math.cos(goal.theta - cur.theta))
+        cur.theta += dTheta * k
+        cur.phi += (goal.phi - cur.phi) * k
+        cur.radius += (goal.radius - cur.radius) * k
+        camera.position.setFromSpherical(cur).add(ctl.target)
+      } else camera.position.lerp(fly.current.pos, k)
+      if (camera.position.distanceTo(fly.current.pos) < 0.05 && ctl.target.distanceTo(fly.current.target) < 0.05) fly.current = null
     }
     ctl.update()
+    // Report the viewing angle a few times a second for the on-screen readout.
+    if (clock.elapsedTime - lastAngles.current.at > 0.15) {
+      const s = tmpSph.setFromVector3(camera.position.clone().sub(ctl.target))
+      const az = Math.round(((THREE.MathUtils.radToDeg(s.theta) % 360) + 360) % 360)
+      const el = Math.round(90 - THREE.MathUtils.radToDeg(s.phi))
+      if (az !== lastAngles.current.az || el !== lastAngles.current.el) props.onAngles({ az, el })
+      lastAngles.current = { az, el, at: clock.elapsedTime }
+    }
   })
 
   // High-resolution PNG still.
@@ -387,6 +570,7 @@ function Scene(props: SceneProps) {
         dampingFactor={0.08}
         autoRotate={showcase}
         autoRotateSpeed={0.6}
+        minPolarAngle={0.02}
         maxPolarAngle={Math.PI / 2 - 0.02}
         minDistance={2}
         maxDistance={Math.max(W, L) * 3}
@@ -401,6 +585,7 @@ function Scene(props: SceneProps) {
       <Ground project={project} look={look} compact={compact} />
       <GroundItems project={project} look={look} />
       {crowd && <Crowd project={project} look={look} motion={motion} compact={compact} />}
+      <Furniture project={project} look={look} onInfo={onInfo} />
       <StageDecks project={project} look={look} onInfo={onInfo} />
       {project.truss.map((t) => (
         <TrussMesh key={t.id} t={t} onInfo={onInfo} />
@@ -1092,6 +1277,110 @@ function GroundItemMesh({ g, base, tent, tech }: { g: GroundItem; base: string; 
   }
 }
 
+// ---------------------------------------------------------------- tables and chairs
+
+const chairGeom = (() => {
+  const seat = new THREE.BoxGeometry(CHAIR * 0.9, 0.05, CHAIR * 0.9)
+  seat.translate(0, 0.46, 0)
+  const back = new THREE.BoxGeometry(CHAIR * 0.9, 0.5, 0.05)
+  back.translate(0, 0.72, -CHAIR * 0.42)
+  const legs = [-1, 1].flatMap((sx) => [-1, 1].map((sz) => new THREE.CylinderGeometry(0.015, 0.015, 0.45, 5).translate((sx * CHAIR) / 2.4, 0.225, (sz * CHAIR) / 2.4)))
+  ;[seat, back, ...legs].forEach((g) => g.deleteAttribute('uv'))
+  return mergeGeometries([seat, back, ...legs])!
+})()
+
+function Furniture({ project, look, onInfo }: { project: Project; look: Look; onInfo: (i: Info) => void }) {
+  const tables = project.tables ?? []
+  const chairs = useRef<THREE.InstancedMesh>(null)
+  const seats = useMemo(() => tables.filter((t) => isSeated(t.kind) && t.kind !== 'lounge').flatMap(seatPositions), [tables])
+  useEffect(() => {
+    const m = chairs.current
+    if (!m) return
+    const o = new THREE.Object3D()
+    seats.forEach((s, i) => {
+      o.position.set(s.x, 0, s.y)
+      // Chairs face the table: the chair front is local +z, the back -z.
+      o.rotation.set(0, -s.angle, 0)
+      o.updateMatrix()
+      m.setMatrixAt(i, o.matrix)
+    })
+    m.instanceMatrix.needsUpdate = true
+  }, [seats])
+  const cloth = look === 'tech' ? '#f2f2f2' : '#e9e6df'
+  const info = (t: Table) => {
+    const at = project.guests?.filter((g) => g.tableId === t.id).length ?? 0
+    onInfo({ title: t.kind === 'row' ? t.label : `Table ${t.label}`, lines: [`${t.kind} · ${t.seats} seats`, `${at} guests seated`, t.kind === 'round' || t.kind === 'cocktail' ? `${t.w.toFixed(2)} m diameter` : `${t.w.toFixed(2)} × ${t.l.toFixed(2)} m`] })
+  }
+  if (!tables.length) return null
+  return (
+    <>
+      {tables.map((t) => (
+        <group key={t.id} position={[t.x, 0, t.y]} rotation-y={(-t.rotation * Math.PI) / 180} onClick={(e: ThreeEvent<MouseEvent>) => (e.stopPropagation(), info(t))} onPointerOver={() => pointer(true)} onPointerOut={() => pointer(false)}>
+          <TableMesh t={t} cloth={cloth} />
+        </group>
+      ))}
+      {seats.length > 0 && (
+        <instancedMesh ref={chairs} args={[chairGeom, undefined, seats.length]} castShadow={look !== 'show'} receiveShadow>
+          <meshStandardMaterial color={look === 'tech' ? '#9a9a9a' : '#c9b37e'} metalness={look === 'tech' ? 0 : 0.6} roughness={0.4} />
+        </instancedMesh>
+      )}
+    </>
+  )
+}
+
+function TableMesh({ t, cloth }: { t: Table; cloth: string }) {
+  switch (t.kind) {
+    case 'row':
+      return null
+    case 'round':
+      return (
+        <mesh position={[0, 0.38, 0]} castShadow receiveShadow>
+          {/* Floor-length cloth flares slightly at the bottom */}
+          <cylinderGeometry args={[t.w / 2, t.w / 2 + 0.08, 0.76, 40]} />
+          <meshStandardMaterial color={cloth} roughness={0.85} />
+        </mesh>
+      )
+    case 'cocktail':
+      return (
+        <mesh position={[0, 0.55, 0]} castShadow>
+          <cylinderGeometry args={[t.w / 2, t.w / 2 + 0.06, 1.1, 28]} />
+          <meshStandardMaterial color={cloth} roughness={0.85} />
+        </mesh>
+      )
+    case 'dance':
+      return (
+        <mesh position={[0, 0.02, 0]} receiveShadow>
+          <boxGeometry args={[t.w, 0.04, t.l]} />
+          <meshStandardMaterial color="#111" metalness={0.6} roughness={0.15} />
+        </mesh>
+      )
+    case 'lounge':
+      return (
+        <>
+          {[0, 1, 2, 3].map((k) => (
+            <mesh key={k} position={[Math.sin((k * Math.PI) / 2) * (t.w / 2 - 0.4), 0.22, Math.cos((k * Math.PI) / 2) * (t.l / 2 - 0.4)]} rotation-y={(k * Math.PI) / 2} castShadow>
+              <boxGeometry args={[t.w * 0.7, 0.44, 0.8]} />
+              <meshStandardMaterial color="#d9d4ca" roughness={0.9} />
+            </mesh>
+          ))}
+          <mesh position={[0, 0.2, 0]}>
+            <boxGeometry args={[0.8, 0.4, 0.8]} />
+            <meshStandardMaterial color="#2a2a2a" />
+          </mesh>
+        </>
+      )
+    default: {
+      const h = t.kind === 'bar' ? 1.1 : 0.76
+      return (
+        <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[t.w, h, t.l]} />
+          <meshStandardMaterial color={t.kind === 'bar' ? '#1c1c1c' : cloth} roughness={0.8} />
+        </mesh>
+      )
+    }
+  }
+}
+
 // ---------------------------------------------------------------- crowd
 
 function personGeometry() {
@@ -1110,12 +1399,20 @@ function Crowd({ project, look, motion, compact }: { project: Project; look: Loo
   const phones = useRef<THREE.InstancedMesh>(null)
   const geom = useMemo(personGeometry, [])
   const people = useMemo(() => {
-    const out: { x: number; z: number; s: number; ph: number; seated: boolean }[] = []
+    const out: { x: number; z: number; s: number; ph: number; seated: boolean; face?: number }[] = []
     let seed = 7
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
-    const zones = project.ground.filter((g) => g.kind === 'crowd' || g.kind === 'vip' || g.kind === 'seating')
+    // With real tables, guests sit on chairs instead of being scattered over seating zones.
+    const seatsList = (project.tables ?? []).filter((t) => isSeated(t.kind)).flatMap(seatPositions)
+    const hasTables = seatsList.length > 0
+    const zones = project.ground.filter((g) => g.kind === 'crowd' || (!hasTables && (g.kind === 'vip' || g.kind === 'seating')))
     const total = zones.reduce((a, g) => a + g.w * g.h, 0) || 1
-    const budget = Math.min(compact ? 1200 : 3000, project.audience || 1000)
+    const budget = Math.max(0, Math.min(compact ? 1200 : 3000, project.audience || 1000) - seatsList.length)
+    const filled = project.guests?.length ? Math.min(seatsList.length, project.guests.length) : Math.round(seatsList.length * 0.85)
+    seatsList.forEach((st, i) => {
+      if ((i * 7919) % seatsList.length >= filled) return
+      out.push({ x: st.x, z: st.y, s: 0.95 + rnd() * 0.1, ph: rnd() * Math.PI * 2, seated: true, face: st.angle })
+    })
     for (const z of zones) {
       const n = Math.round((budget * z.w * z.h) / total)
       const cx = z.x + z.w / 2
@@ -1135,7 +1432,7 @@ function Crowd({ project, look, motion, compact }: { project: Project; look: Loo
       }
     }
     return out
-  }, [project.ground, project.audience, compact])
+  }, [project.ground, project.audience, project.tables, project.guests, compact])
   const phoneIdx = useMemo(() => people.map((_, i) => i).filter((i) => i % 23 === 0), [people])
 
   useEffect(() => {
@@ -1146,7 +1443,7 @@ function Crowd({ project, look, motion, compact }: { project: Project; look: Loo
     people.forEach((p, i) => {
       o.position.set(p.x, p.seated ? -0.45 : 0, p.z)
       o.scale.setScalar(p.s)
-      o.rotation.y = Math.sin(p.ph) * 0.4
+      o.rotation.y = p.face != null ? -p.face : Math.sin(p.ph) * 0.4
       o.updateMatrix()
       m.setMatrixAt(i, o.matrix)
       const v = look === 'tech' ? 0.55 + (i % 7) * 0.03 : 0.12 + ((i * 13) % 17) / 100

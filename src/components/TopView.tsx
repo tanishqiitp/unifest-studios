@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Arc, Circle, Group, Image as KImage, Line, Rect, Text, Transformer, Wedge } from 'react-konva'
 import type Konva from 'konva'
 import { useStore } from '../store'
-import type { GroundItem, Project } from '../types'
+import type { GroundItem, Project, Table } from '../types'
+import { CHAIR, isSeated, seatPositions } from '../lib/seating'
 import { rigging, screenColumns, screenStats, TRUSS_INFO } from '../lib/calc'
 import { useSnap, useView } from './PlanCanvas'
 
@@ -23,7 +24,7 @@ export const GROUND_STYLE: Record<GroundItem['kind'], { fill: string; stroke: st
   label: { fill: '#00000000', stroke: '#3f3f3f', name: 'Label', tip: 'Free text note.' },
 }
 
-type Edit = 'ground' | 'stage' | 'truss'
+type Edit = 'ground' | 'stage' | 'truss' | 'seating'
 
 export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sightlines?: boolean; extra?: ReactNode }) {
   const p = useStore((s) => s.project)
@@ -36,6 +37,9 @@ export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sight
       <Line points={[p.venue.w / 2, 0, p.venue.w / 2, p.venue.l]} stroke="#fff" opacity={0.12} dash={[6, 6]} strokeWidth={1} strokeScaleEnabled={false} listening={false} />
       {p.ground.map((g) => (
         <GroundNode key={g.id} g={g} editable={edit === 'ground'} />
+      ))}
+      {p.tables.map((t) => (
+        <TableNode key={t.id} t={t} editable={edit === 'seating'} dim={edit !== 'seating'} />
       ))}
       {p.decks.map((d) => (
         <DeckNode key={d.id} id={d.id} editable={edit === 'stage'} dim={edit === 'ground'} />
@@ -376,6 +380,95 @@ function RigOverlay({ project }: { project: Project }) {
           </Group>
         )
       })}
+    </>
+  )
+}
+
+const TABLE_FILL: Partial<Record<Table['kind'], string>> = { dance: '#ffffff14', buffet: '#ffffff26', bar: '#ffffff26', lounge: '#ffffff18' }
+
+function TableNode({ t, editable, dim }: { t: Table; editable: boolean; dim: boolean }) {
+  const v = useView()
+  const sel = useStore((s) => s.ui.selection)
+  const tool = useStore((s) => s.ui.tool)
+  const taken = useStore((s) => s.project.guests.filter((g) => g.tableId === t.id).length)
+  const { mutate, select } = useStore.getState()
+  const snap = useSnap()
+  const ref = useRef<Konva.Group>(null)
+  const tr = useRef<Konva.Transformer>(null)
+  const selected = sel?.kind === 'table' && sel.id === t.id
+  useEffect(() => {
+    if (selected && editable && tr.current && ref.current) {
+      tr.current.nodes([ref.current])
+      tr.current.getLayer()?.batchDraw()
+    }
+  }, [selected, editable])
+  const round = t.kind === 'round' || t.kind === 'cocktail'
+  // Seats in the table's own frame, so the group can rotate as one piece.
+  const seats = seatPositions({ ...t, x: 0, y: 0, rotation: 0 })
+  const stroke = selected && editable ? '#fff' : '#8a8a8a'
+  const fs = Math.min(Math.max(t.l, 0.5) * 0.45, 12 / v.scale, 0.5)
+  const showSeats = !dim || v.scale > 6
+  return (
+    <>
+      <Group
+        ref={ref}
+        x={t.x}
+        y={t.y}
+        rotation={t.rotation}
+        opacity={dim ? 0.55 : 1}
+        listening={editable}
+        draggable={editable && tool === 'select'}
+        onMouseDown={(e) => {
+          e.cancelBubble = true
+          select({ kind: 'table', id: t.id })
+        }}
+        onDragEnd={(e) => {
+          const nx = snap(e.target.x(), 0.25)
+          const ny = snap(e.target.y(), 0.25)
+          e.target.position({ x: nx, y: ny })
+          mutate((p) => {
+            const x = p.tables.find((q) => q.id === t.id)!
+            x.x = nx
+            x.y = ny
+          })
+        }}
+        onTransformEnd={(e) => {
+          const rot = Math.round(e.target.rotation())
+          e.target.scale({ x: 1, y: 1 })
+          mutate((p) => void (p.tables.find((q) => q.id === t.id)!.rotation = ((rot % 360) + 360) % 360))
+        }}
+      >
+        {showSeats &&
+          isSeated(t.kind) &&
+          t.kind !== 'lounge' &&
+          seats.map((s, i) => (
+            <Rect
+              key={i}
+              x={s.x}
+              y={s.y}
+              width={CHAIR}
+              height={CHAIR}
+              offsetX={CHAIR / 2}
+              offsetY={CHAIR / 2}
+              rotation={(s.angle * 180) / Math.PI}
+              cornerRadius={0.06}
+              fill={i < taken ? '#d4d4d4' : '#000'}
+              stroke="#6b6b6b"
+              strokeWidth={1}
+              strokeScaleEnabled={false}
+            />
+          ))}
+        {t.kind === 'row' ? null : round ? (
+          <Circle radius={t.w / 2} fill={t.kind === 'cocktail' ? '#ffffff20' : '#1c1c1c'} stroke={stroke} strokeWidth={selected ? 2 : 1} strokeScaleEnabled={false} />
+        ) : (
+          <Rect x={-t.w / 2} y={-t.l / 2} width={t.w} height={t.l} cornerRadius={t.kind === 'lounge' ? 0.3 : 0.04} fill={TABLE_FILL[t.kind] ?? '#1c1c1c'} stroke={stroke} strokeWidth={selected ? 2 : 1} dash={t.kind === 'dance' ? [4, 4] : undefined} strokeScaleEnabled={false} />
+        )}
+        {t.kind === 'row' && <Rect x={-t.w / 2} y={-CHAIR / 2} width={t.w} height={CHAIR} stroke={selected && editable ? '#fff' : '#00000000'} strokeWidth={1} strokeScaleEnabled={false} />}
+        {t.kind !== 'row' && (
+          <Text x={-t.w / 2} y={-fs / 2} width={t.w} align="center" text={t.label} fontSize={fs} fontFamily="Inter" fontStyle="600" fill="#d4d4d4" rotation={0} listening={false} />
+        )}
+      </Group>
+      {selected && editable && <Transformer ref={tr} resizeEnabled={false} rotateEnabled borderStroke="#fff" anchorStroke="#fff" anchorFill="#000" rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]} rotationSnapTolerance={8} />}
     </>
   )
 }

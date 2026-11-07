@@ -1,6 +1,7 @@
 import type { Project, Workspace } from '../types'
 import { capacity, pixelLayout, portMap, powerPlan, rigging, screenSize, screenStats, stageBounds } from './calc'
 import { findPanel } from './panels'
+import { seatCount } from './seating'
 import type { Selection } from '../store'
 
 export interface Warning {
@@ -69,5 +70,19 @@ export function getWarnings(p: Project): Warning[] {
       out.push({ level: 'warn', text: `${g.label} is outside the venue boundary.`, workspace: 'ground', target: { kind: 'ground', id: g.id } })
   }
   if (!sb) out.push({ level: 'warn', text: 'There is no stage yet.', fix: 'Pick a stage preset in the Stage workspace.', workspace: 'stage' })
+
+  // Seating
+  const seats = seatCount(p)
+  const guests = p.guests ?? []
+  if (guests.length > seats && seats > 0) out.push({ level: 'warn', text: `${guests.length} guests but only ${seats} seats.`, fix: 'Add tables, or generate a layout for your guest count.', workspace: 'seating' })
+  const unseated = guests.filter((g) => !g.tableId).length
+  if (unseated && seats > 0) out.push({ level: 'warn', text: `${unseated} guest${unseated === 1 ? ' has' : 's have'} no table.`, fix: 'Use Auto-seat in the Seating workspace.', workspace: 'seating' })
+  for (const t of p.tables ?? []) {
+    const over = guests.filter((g) => g.tableId === t.id).length - t.seats
+    if (over > 0) out.push({ level: 'warn', text: `Table ${t.label} has ${over} more guest${over === 1 ? '' : 's'} than seats.`, workspace: 'seating', target: { kind: 'table', id: t.id } })
+    const r = Math.max(t.w, t.l) / 2
+    if (t.x - r < -0.01 || t.y - r < -0.01 || t.x + r > p.venue.w + 0.01 || t.y + r > p.venue.l + 0.01)
+      out.push({ level: 'warn', text: `${t.kind === 'row' ? t.label : `Table ${t.label}`} is outside the venue.`, workspace: 'seating', target: { kind: 'table', id: t.id } })
+  }
   return out
 }

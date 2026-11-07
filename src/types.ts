@@ -1,7 +1,7 @@
 // All distances are metres, weights kg, power watts.
 // Top view: x runs across the venue, y runs from the back of the stage (0) towards the audience.
 
-export type Workspace = 'ground' | 'stage' | 'truss' | 'led' | 'viz' | 'deliver'
+export type Workspace = 'ground' | 'stage' | 'truss' | 'led' | 'seating' | 'viz' | 'deliver'
 export type Mode = 'simple' | 'pro'
 export type Units = 'm' | 'ft'
 
@@ -111,6 +111,33 @@ export interface Fixture {
   z: number
 }
 
+// Seating: tables and other furniture, positioned by their centre in the top view.
+export type TableKind = 'round' | 'banquet' | 'cocktail' | 'sweetheart' | 'row' | 'classroom' | 'lounge' | 'dance' | 'buffet' | 'bar'
+
+export interface Table {
+  id: string
+  kind: TableKind
+  x: number
+  y: number
+  w: number // across; diameter for round and cocktail tables
+  l: number // depth
+  rotation: number // degrees
+  seats: number
+  label: string
+  open?: boolean // round table with the stage-facing side left empty (cabaret)
+}
+
+export type Meal = 'veg' | 'non-veg' | 'jain' | 'vegan' | 'kids'
+
+export interface Guest {
+  id: string
+  name: string
+  group: string
+  meal: Meal
+  vip: boolean
+  tableId?: string
+}
+
 export interface Project {
   version: 1
   id?: string // set when the project is stored in this browser's library
@@ -125,6 +152,8 @@ export interface Project {
   truss: Truss[]
   hoists: Hoist[]
   fixtures: Fixture[]
+  tables: Table[]
+  guests: Guest[]
   customPanels: Panel[]
   processor: { portPx: number; name: string }
   circuitAmps: 16 | 32
