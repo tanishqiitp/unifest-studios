@@ -8,3 +8,14 @@ enable_signup = true
 
 [auth.email]
 enabled = true
+
+
+# Branded sign-in emails (supabase/templates). Supabase only allows custom templates once a
+# custom SMTP sender is set up; uncomment these then and run supabase config push.
+# [auth.email.template.magic_link]
+# subject = "Your Unifest Studios sign-in link"
+# content_path = "./supabase/templates/magic_link.html"
+#
+# [auth.email.template.confirmation]
+# subject = "Confirm your Unifest Studios account"
+# content_path = "./supabase/templates/confirmation.html"

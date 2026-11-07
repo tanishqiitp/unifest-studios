@@ -194,6 +194,12 @@ describe('Share links and seating', () => {
     g.location.hash = link.slice(link.indexOf('#'))
     const back = readShareHash()!
     expect(back.tables.length).toBe(p.tables.length)
+    back.tables.forEach((t, i) => {
+      const o = p.tables[i]
+      expect([t.kind, t.seats, t.rotation, !!t.open, t.label]).toEqual([o.kind, o.seats, o.rotation, !!o.open, o.label])
+      expect(Math.abs(t.x - o.x)).toBeLessThanOrEqual(0.05)
+      expect(Math.abs(t.y - o.y)).toBeLessThanOrEqual(0.05)
+    })
     expect(back.guests).toEqual([])
     expect(link.length).toBeLessThan(2900)
     g.location.hash = ''

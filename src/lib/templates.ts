@@ -24,6 +24,8 @@ export const TEMPLATES: (WizardInput & { blurb: string })[] = [
   { name: 'Corporate Keynote', eventType: 'Corporate Keynote', audience: 600, venueW: 30, venueL: 45, outdoor: false, blurb: 'Theatre seating, low stage, 16:9 centre + IMAG screens.' },
   { name: 'Fashion Runway', eventType: 'Fashion Runway', audience: 300, venueW: 25, venueL: 40, outdoor: false, blurb: 'Catwalk thrust with seated sides and back LED.' },
   { name: 'Stand-up Comedy', eventType: 'Stand-up Comedy', audience: 250, venueW: 20, venueL: 28, outdoor: false, blurb: 'Intimate seated room, small stage and screen.' },
+  // Real Jaipur venue; lawn size estimated from its listed 2,000-guest seated capacity (no published dimensions).
+  { name: 'Wedding at Entertainment Paradise, Jaipur', eventType: 'Wedding Sangeet', audience: 1000, venueW: 55, venueL: 75, outdoor: true, blurb: 'East Lawn wedding for 1,000 guests: stage, LED, truss and round tables. Lawn size is an estimate.' },
 ]
 
 const id = () => nanoid(8)

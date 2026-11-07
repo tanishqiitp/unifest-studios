@@ -1,6 +1,6 @@
 import Drawing from 'dxf-writer'
 import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string'
-import type { Deck, Project } from '../../types'
+import type { Deck, Project, Table } from '../../types'
 import { cableOrder, pixelLayout, rigging, screenColumns, screenStats, TRUSS_INFO } from '../calc'
 
 export function download(name: string, data: Blob | string, type = 'text/plain') {
@@ -277,10 +277,12 @@ export function liteProject(p: Project): Project {
     hoists: short(p.hoists, 'h'),
     fixtures: short(p.fixtures, 'f'),
     // Client links show the room layout but never the guest list.
-    tables: short(p.tables ?? [], 'b'),
+    // Tables travel as compact rows (see packTables): a 120-table wedding still fits a QR code.
+    tables: [],
     guests: [],
   }
   for (const k of LISTS) (lite[k] as unknown as Record<string, unknown>[]) = (lite[k] as unknown as Record<string, unknown>[]).map(dropDefaults)
+  ;(lite as Project & { tb?: unknown[] }).tb = packTables(p.tables ?? [])
   return JSON.parse(JSON.stringify(lite, (_k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)))
 }
 
@@ -312,6 +314,11 @@ function dropDefaults(o: Record<string, unknown>) {
 
 export function restoreDefaults(p: Project): Project {
   for (const k of LISTS) (p[k] as unknown as Record<string, unknown>[]) = ((p[k] ?? []) as unknown as Record<string, unknown>[]).map((o) => ({ ...ITEM_DEFAULTS[k], ...o }))
+  const packed = (p as Project & { tb?: unknown[][] }).tb
+  if (packed) {
+    p.tables = unpackTables(packed)
+    delete (p as Project & { tb?: unknown }).tb
+  }
   p.guests ??= []
   return p
 }
@@ -325,4 +332,36 @@ export function readShareHash(): Project | null {
   } catch {
     return null
   }
+}
+
+// Full row [kind, x, y, w, l, rotation, seats, open, label?]; a table shaped like the one before it
+// is just [x, y, label?], or [x] when it also sits in the same row. Labels are left out when they are the plain table number.
+const KINDS: Table['kind'][] = ['round', 'banquet', 'cocktail', 'sweetheart', 'row', 'classroom', 'lounge', 'dance', 'buffet', 'bar']
+const r2 = (n: number) => Math.round(n * 100) / 100
+const r1 = (n: number) => Math.round(n * 10) / 10
+const shape = (t: Table) => `${t.kind}|${r2(t.w)}|${r2(t.l)}|${Math.round(t.rotation)}|${t.seats}|${t.open ? 1 : 0}`
+
+function packTables(tables: Table[]) {
+  return tables.map((t, i) => {
+    const same = i > 0 && shape(tables[i - 1]) === shape(t)
+    // Positions to 10 cm are plenty for a client preview.
+    const sameRow = same && r1(tables[i - 1].y) === r1(t.y) && t.label === String(i + 1)
+    if (sameRow) return [r1(t.x)]
+    const row: (number | string)[] = same ? [r1(t.x), r1(t.y)] : [KINDS.indexOf(t.kind), r1(t.x), r1(t.y), r2(t.w), r2(t.l), Math.round(t.rotation), t.seats, t.open ? 1 : 0]
+    if (t.label !== String(i + 1)) row.push(t.label)
+    return row
+  })
+}
+
+function unpackTables(rows: unknown[][]): Table[] {
+  const out: Table[] = []
+  rows.forEach((r, i) => {
+    const prev = out[i - 1]
+    const short = r.length <= 3 && prev
+    const t: Table = short
+      ? { ...prev, id: `b${i}`, x: Number(r[0]), y: r.length === 1 ? prev.y : Number(r[1]), label: r[2] != null ? String(r[2]) : String(i + 1) }
+      : { id: `b${i}`, kind: KINDS[Number(r[0])] ?? 'round', x: Number(r[1]), y: Number(r[2]), w: Number(r[3]), l: Number(r[4]), rotation: Number(r[5]), seats: Number(r[6]), open: r[7] === 1, label: r[8] != null ? String(r[8]) : String(i + 1) }
+    out.push(t)
+  })
+  return out
 }

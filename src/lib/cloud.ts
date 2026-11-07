@@ -40,6 +40,23 @@ export async function sendLoginLink(email: string) {
   if (error) throw new Error(error.message)
 }
 
+// Which sign-in providers are switched on in Supabase (public endpoint).
+export async function enabledProviders(): Promise<{ google: boolean }> {
+  if (!url || !key) return { google: false }
+  try {
+    const r = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key } })
+    const j = (await r.json()) as { external?: Record<string, boolean> }
+    return { google: !!j.external?.google }
+  } catch {
+    return { google: false }
+  }
+}
+
+export async function signInWithGoogle() {
+  const { error } = await need().auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}/` } })
+  if (error) throw new Error(error.message)
+}
+
 export async function signOut() {
   await need().auth.signOut()
 }
