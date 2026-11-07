@@ -19,6 +19,14 @@ Share links and QR codes only work for other people once the app is hosted. It i
 
 `.github/workflows/ci.yml` runs the tests and build on every push.
 
+## Accounts and cloud saving (Supabase)
+- Sign in with an emailed link (no password). Signed-in projects save to the cloud a moment after each edit and appear on any device; projects already in a browser can be uploaded from the home screen. The app still works fully without an account.
+- Signed-in users get short client links (`/s/<code>`) that always show the latest saved design.
+- Database: `supabase/migrations/` (tables `projects` and `shares`, owner-only row-level security; share links open only by exact code through `get_share`). Auth URLs: `supabase/config.toml` (`supabase config push`).
+- Settings: `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (see `.env.example`; already set on Vercel). Without them the app runs browser-only.
+- `.github/workflows/keep-awake.yml` pings the database every 3 days so the free project never pauses.
+- Supabase's built-in email sender only allows a few sign-in emails per hour. Before launch, connect a free SMTP service (for example Resend) under Authentication → SMTP Settings.
+
 ## Getting around
 - The **home screen** lists your saved projects (open, open in 3D, duplicate, delete) and the templates. Click the logo to return to it.
 - Each workspace shows a short **guide** with a button to the next step. The **?** button in the top bar brings it back.

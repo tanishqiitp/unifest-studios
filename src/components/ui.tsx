@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Info } from 'lucide-react'
 
 export function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
@@ -166,7 +167,8 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
   }, [onClose])
-  return (
+  // Rendered on <body> so a blurred or transformed parent can't trap the overlay.
+  return createPortal(
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onMouseDown={onClose}>
       <div className={`card fade-in w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[90vh] overflow-auto`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-line">
@@ -177,6 +179,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         </div>
         <div className="p-6">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

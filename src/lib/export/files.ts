@@ -262,7 +262,8 @@ function mergeDecks(decks: Deck[]): Deck[] {
   return out.map((d, i) => ({ ...d, id: `d${i}` }))
 }
 
-export function shareLink(p: Project) {
+// Read-only copy for client links: no images, short ids, merged decks, default values left out.
+export function liteProject(p: Project): Project {
   const short = <T extends { id: string }>(a: T[], k: string) => a.map((x, i) => ({ ...x, id: `${k}${i}` }))
   const ids = new Map(p.screens.map((s, i) => [s.id, `s${i}`]))
   const lite: Project = {
@@ -277,7 +278,11 @@ export function shareLink(p: Project) {
     fixtures: short(p.fixtures, 'f'),
   }
   for (const k of LISTS) (lite[k] as unknown as Record<string, unknown>[]) = (lite[k] as unknown as Record<string, unknown>[]).map(dropDefaults)
-  return `${location.origin}${location.pathname}#view=${compressToEncodedURIComponent(JSON.stringify(lite, (_k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)))}`
+  return JSON.parse(JSON.stringify(lite, (_k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)))
+}
+
+export function shareLink(p: Project) {
+  return `${location.origin}/#view=${compressToEncodedURIComponent(JSON.stringify(liteProject(p)))}`
 }
 
 // Share links leave out zero, false, empty-text and empty-list fields on list items; reading puts them back.

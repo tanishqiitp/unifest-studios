@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
-import { ArrowRight, Box, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowRight, Box, Cloud, CloudUpload, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import type { Project } from '../types'
 import { screenColumns, screenStats } from '../lib/calc'
-import { deleteProject, readLibrary, readProject, type LibEntry } from '../lib/library'
+import { deleteProject, readLibrary, readProject, writeProject, type LibEntry } from '../lib/library'
+import { deleteCloudProject, fetchCloudProject, listCloudProjects, pushProject, useAuth } from '../lib/cloud'
+import { AccountButton } from './Account'
 import { readProjectFile } from '../lib/export/files'
 import { generateProject, TEMPLATES } from '../lib/templates'
 
@@ -59,6 +61,45 @@ export function Home() {
   const file = useRef<HTMLInputElement>(null)
   const templates = useMemo(() => TEMPLATES.map((t) => ({ t, p: generateProject(t) })), [])
   const projects = useMemo(() => lib.map((e) => ({ e, p: readProject(e.id) })).filter((x): x is { e: LibEntry; p: Project } => !!x.p), [lib])
+  const user = useAuth((a) => a.user)
+  const [cloudIds, setCloudIds] = useState<Set<string>>(new Set())
+  const [uploading, setUploading] = useState(false)
+
+  // Signed in: bring down anything newer in the cloud so this browser has every project.
+  useEffect(() => {
+    if (!user) return setCloudIds(new Set())
+    let live = true
+    listCloudProjects()
+      .then(async (cloud) => {
+        const local = new Map(readLibrary().map((e) => [e.id, e.updatedAt]))
+        const stale = cloud.filter((c) => !local.has(c.id) || c.updatedAt > (local.get(c.id) ?? 0) + 1000)
+        for (const c of stale.slice(0, 50)) {
+          const p = await fetchCloudProject(c.id)
+          if (p) writeProject({ ...p, id: c.id }, false)
+        }
+        if (live) {
+          setCloudIds(new Set(cloud.map((c) => c.id)))
+          setLib(readLibrary())
+        }
+      })
+      .catch(() => notify('Could not reach the cloud. Showing projects saved in this browser.'))
+    return () => {
+      live = false
+    }
+  }, [user, notify])
+
+  const localOnly = user ? projects.filter(({ e }) => !cloudIds.has(e.id)) : []
+  const uploadAll = async () => {
+    setUploading(true)
+    try {
+      for (const { p } of localOnly) await pushProject(p)
+      setCloudIds(new Set([...cloudIds, ...localOnly.map(({ e }) => e.id)]))
+      notify(`Uploaded ${localOnly.length} project${localOnly.length === 1 ? '' : 's'} to your account`)
+    } catch (e) {
+      notify(`Upload failed: ${(e as Error).message}`)
+    }
+    setUploading(false)
+  }
 
   const open = (p: Project, ws: 'ground' | 'viz' = 'ground') => {
     setProject(p)
@@ -77,6 +118,7 @@ export function Home() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <AccountButton />
           <button className="btn" onClick={() => file.current?.click()}>
             <FolderOpen size={13} /> Open file
           </button>
@@ -155,8 +197,15 @@ export function Home() {
             <div className="flex items-end justify-between mb-4">
               <div>
                 <h2 className="font-display text-xl font-semibold">Your projects</h2>
-                <p className="text-xs text-mute mt-0.5">Saved in this browser. Use Deliver → Project file to move one to another computer.</p>
+                <p className="text-xs text-mute mt-0.5">
+                  {user ? 'Synced with your account and saved in this browser.' : 'Saved in this browser. Sign in to keep them in the cloud and open them anywhere.'}
+                </p>
               </div>
+              {localOnly.length > 0 && (
+                <button className="btn" onClick={uploadAll} disabled={uploading}>
+                  <CloudUpload size={13} /> {uploading ? 'Uploading…' : `Upload ${localOnly.length} browser project${localOnly.length === 1 ? '' : 's'} to my account`}
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-3 gap-4">
               {projects.map(({ e, p }) => (
@@ -166,7 +215,10 @@ export function Home() {
                   </button>
                   <div className="p-3 border-t border-line flex items-start gap-2">
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{e.name}</div>
+                      <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                        {cloudIds.has(e.id) && <Cloud size={12} className="shrink-0 text-dim" aria-label="Saved in the cloud" />}
+                        {e.name}
+                      </div>
                       <div className="text-[11px] text-mute">
                         {e.eventType} · {e.audience.toLocaleString('en-IN')} guests · {ago(e.updatedAt)}
                       </div>
@@ -177,6 +229,7 @@ export function Home() {
                           className="btn h-7 text-[11px] border-err/60 text-err"
                           onClick={() => {
                             deleteProject(e.id)
+                            if (cloudIds.has(e.id)) deleteCloudProject(e.id).catch(() => notify('Deleted here, but the cloud copy could not be removed. Try again later.'))
                             setLib(readLibrary())
                             setConfirm(null)
                             notify(`Deleted ${e.name}`)

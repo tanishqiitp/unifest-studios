@@ -4,6 +4,7 @@ import type { Mode, Project, Screen, Workspace } from './types'
 import { findPanel } from './lib/panels'
 import { generateProject, TEMPLATES } from './lib/templates'
 import { loadCurrent, writeProject } from './lib/library'
+import { cloudEnabled, pushProject, useAuth } from './lib/cloud'
 import { nanoid } from 'nanoid'
 
 export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture'; id: string } | null
@@ -113,8 +114,31 @@ useStore.subscribe((s, prev) => {
   if (s.project === prev.project) return
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => writeProject(s.project), 400)
+  scheduleCloudSave()
 })
 
+// Signed-in users also get a cloud copy, a little after they stop editing.
+let cloudTimer: ReturnType<typeof setTimeout> | undefined
+export function scheduleCloudSave(delay = 1500) {
+  if (!cloudEnabled || !useAuth.getState().user) return
+  clearTimeout(cloudTimer)
+  useAuth.setState({ sync: 'saving' })
+  cloudTimer = setTimeout(async () => {
+    try {
+      await pushProject(useStore.getState().project)
+      useAuth.setState({ sync: 'saved' })
+    } catch {
+      useAuth.setState({ sync: 'offline' })
+    }
+  }, delay)
+}
+
 export function saveNow() {
+  scheduleCloudSave(0)
   return writeProject(useStore.getState().project)
 }
+
+// After signing in, back up the open project straight away.
+useAuth.subscribe((a, prev) => {
+  if (a.user && a.user.id !== prev.user?.id) scheduleCloudSave(0)
+})

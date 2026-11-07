@@ -145,3 +145,42 @@ describe('Project library', () => {
     expect(writeProject({ ...generateProject(TEMPLATES[0]), id: undefined })).toBe(false)
   })
 })
+
+describe('Cloud sync helpers', () => {
+  it('merges local and cloud lists, newest copy wins', async () => {
+    const { mergeEntries } = await import('../cloud')
+    const local = [
+      { id: 'a', updatedAt: 5 },
+      { id: 'b', updatedAt: 9 },
+    ]
+    const cloud = [
+      { id: 'a', updatedAt: 7 },
+      { id: 'c', updatedAt: 1 },
+    ]
+    const m = mergeEntries(local, cloud)
+    expect(m.map((x) => [x.id, x.updatedAt, x.where])).toEqual([
+      ['b', 9, 'local'],
+      ['a', 7, 'both'],
+      ['c', 1, 'cloud'],
+    ])
+  })
+
+  it('stores the whole project as the row data with searchable columns', async () => {
+    const { projectRow } = await import('../cloud')
+    const p = { ...generateProject(TEMPLATES[0]), id: 'xyz', updatedAt: Date.UTC(2026, 0, 1) }
+    const r = projectRow(p)
+    expect(r).toMatchObject({ id: 'xyz', name: p.name, event_type: p.eventType, audience: p.audience, updated_at: '2026-01-01T00:00:00.000Z' })
+    expect(r.data.screens).toHaveLength(p.screens.length)
+  })
+
+  it('reads short link codes only from /s/<code>', async () => {
+    const { shareCodeFromPath } = await import('../cloud')
+    const at = (path: string) => ((g.location as unknown as { pathname: string }).pathname = path)
+    at('/s/AbC123_xyZ')
+    expect(shareCodeFromPath()).toBe('AbC123_xyZ')
+    at('/s/short')
+    expect(shareCodeFromPath()).toBeNull()
+    at('/')
+    expect(shareCodeFromPath()).toBeNull()
+  })
+})

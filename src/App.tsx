@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ChevronDown, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
-import type { Workspace } from './types'
+import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
 import { getWarnings } from './lib/warnings'
 import { readProjectFile, readShareHash } from './lib/export/files'
+import { fetchShare, shareCodeFromPath, useAuth } from './lib/cloud'
+import { AccountButton } from './components/Account'
 import { generateProject, EVENT_TYPES, TEMPLATES, type EventType, type WizardInput } from './lib/templates'
 import { LedWorkspace, newScreen } from './workspaces/Led'
 import { GroundWorkspace } from './workspaces/Ground'
@@ -39,19 +41,27 @@ const TABS: { id: Workspace; label: string; short: string; kicker: string }[] = 
 ]
 
 export default function App() {
-  const [shared] = useState(() => readShareHash())
+  const [shared] = useState(() => !!readShareHash() || !!shareCodeFromPath())
   if (shared) return <SharedView />
   return <Studio />
 }
 
 function SharedView() {
-  const [p, setP] = useState(() => readShareHash())
+  const code = shareCodeFromPath()
+  const [p, setP] = useState<Project | null>(() => (code ? null : readShareHash()))
+  const [loading, setLoading] = useState(!!code)
   useEffect(() => {
+    if (code) {
+      // Short links fetch the latest version of the design each time they open.
+      fetchShare(code).then((x) => (setP(x), setLoading(false)))
+      return
+    }
     const h = () => setP(readShareHash())
     window.addEventListener('hashchange', h)
     return () => window.removeEventListener('hashchange', h)
-  }, [])
-  if (!p) return <div className="h-full flex items-center justify-center text-dim text-sm">This link is broken or incomplete.</div>
+  }, [code])
+  if (loading) return <Loading3D />
+  if (!p) return <div className="h-full flex items-center justify-center text-dim text-sm">This link is broken, incomplete or was removed by its owner.</div>
   return (
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 flex items-center justify-between px-5 border-b border-line">
@@ -249,6 +259,7 @@ function TopBar() {
             e.target.value = ''
           }}
         />
+        <AccountButton />
         <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
           <HelpCircle size={14} />
         </button>
@@ -322,8 +333,12 @@ function ToolRail() {
   )
 }
 
+const SAVE_LABEL = { idle: 'Autosaved · cloud sync on', saving: 'Saving to cloud…', saved: 'Saved to cloud', offline: 'Saved in this browser · cloud unreachable' } as const
+
 function WarningsBar() {
   const project = useStore((s) => s.project)
+  const { user, sync } = useAuth()
+  const saveLabel = user ? SAVE_LABEL[sync] : 'Autosaved in this browser'
   const open = useStore((s) => s.ui.warningsOpen)
   const { setUI, select } = useStore.getState()
   const w = getWarnings(project)
@@ -357,7 +372,7 @@ function WarningsBar() {
           {w.length ? <AlertTriangle size={13} className={errors ? 'text-err' : 'text-warn'} /> : <span className="h-2 w-2 rounded-full bg-white" />}
           {w.length ? `${errors} errors · ${w.length - errors} warnings` : 'All checks passed'}
         </button>
-        <span className="text-mute">Autosaved in this browser · {project.eventType} · {project.audience.toLocaleString('en-IN')} guests</span>
+        <span className="text-mute">{saveLabel} · {project.eventType} · {project.audience.toLocaleString('en-IN')} guests</span>
       </footer>
     </>
   )

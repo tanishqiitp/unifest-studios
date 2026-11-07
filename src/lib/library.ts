@@ -28,11 +28,12 @@ function writeLibrary(list: LibEntry[]) {
   localStorage.setItem(LIB_KEY, JSON.stringify(list))
 }
 
-export function writeProject(p: Project): boolean {
+// `current` marks it as the project to reopen next time; cloud downloads pass false.
+export function writeProject(p: Project, current = true): boolean {
   if (!p.id) return false
   try {
     localStorage.setItem(pKey(p.id), JSON.stringify(p))
-    localStorage.setItem(CUR_KEY, p.id)
+    if (current) localStorage.setItem(CUR_KEY, p.id)
     const entry: LibEntry = { id: p.id, name: p.name, eventType: p.eventType, audience: p.audience, screens: p.screens.length, updatedAt: p.updatedAt || Date.now() }
     writeLibrary([entry, ...readLibrary().filter((e) => e.id !== p.id)])
     return true

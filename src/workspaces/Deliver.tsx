@@ -5,13 +5,24 @@ import { useStore } from '../store'
 import { fmt, pixelLayout, totals } from '../lib/calc'
 import { download, exportDXF, exportPixelMap, exportProject, exportResolume, pixelMapCanvas, shareLink, slug } from '../lib/export/files'
 import { equipmentCSV } from '../lib/export/equipment'
+import { cloudEnabled, ensureShare, shortLink, useAuth } from '../lib/cloud'
 
 export function DeliverWorkspace() {
   const project = useStore((s) => s.project)
   const { notify, setUI } = useStore.getState()
   const t = totals(project)
   const pl = pixelLayout(project)
-  const link = useMemo(() => shareLink(project), [project])
+  const user = useAuth((a) => a.user)
+  const [code, setCode] = useState<string | null>(null)
+  // Signed in: a short link that always shows the latest saved design.
+  useEffect(() => {
+    if (!user) return setCode(null)
+    const t = setTimeout(() => ensureShare(project).then(setCode).catch(() => setCode(null)), code ? 1500 : 0)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, project])
+  const longLink = useMemo(() => shareLink(project), [project])
+  const link = code ? shortLink(code) : longLink
   const [qr, setQr] = useState<string | null>(null)
   const preview = useMemo(() => (pl.width ? pixelMapCanvas(project, 900).toDataURL() : null), [project, pl.width])
   const qrFits = link.length < 2900
@@ -62,7 +73,13 @@ export function DeliverWorkspace() {
                   <div className="flex items-center gap-2 text-sm font-semibold">
                     <Link2 size={15} /> Live 3D client view
                   </div>
-                  <p className="text-xs text-dim mt-1 leading-relaxed">A read-only, interactive 3D link that works on phones. The whole design travels inside the link, so no account is needed.</p>
+                  <p className="text-xs text-dim mt-1 leading-relaxed">
+                    {code
+                      ? 'A short, read-only 3D link that works on phones. It always shows your latest saved design, so you never need to resend it.'
+                      : 'A read-only, interactive 3D link that works on phones. The whole design travels inside the link, so no account is needed.'}
+                  </p>
+                  {code && <p className="mono text-[11px] text-white mt-2 truncate">{link.replace(/^https?:\/\//, '')}</p>}
+                  {!user && cloudEnabled && <p className="text-[11px] text-mute mt-2">Sign in for a short link that updates itself when you change the design.</p>}
                   {isLocal && <p className="text-[11px] text-warn mt-2">You're running locally, so this link only opens on this computer. Deploy the app to share it with others.</p>}
                   <div className="flex gap-2 mt-4">
                     <button className="btn btn-primary" onClick={() => navigator.clipboard.writeText(link).then(() => notify('Link copied'))}>

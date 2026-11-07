@@ -1,0 +1,10 @@
+# Only the settings declared here are pushed to the hosted project (supabase config push).
+project_id = "unifest-studios"
+
+[auth]
+site_url = "https://unifest-studios.vercel.app"
+additional_redirect_urls = ["https://unifest-studios.vercel.app/**", "http://localhost:5173/**"]
+enable_signup = true
+
+[auth.email]
+enabled = true
