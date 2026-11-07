@@ -137,6 +137,8 @@ export interface VenueRoom {
   theatre?: number
   banquet?: number
   standing?: number
+  // Size estimated from a published floor area (no exact length and width available).
+  approx?: boolean
 }
 
 export interface Venue {
@@ -171,9 +173,10 @@ export const VENUE_KINDS: { id: string; name: string }[] = [
 
 export async function searchVenues(q: string): Promise<Venue[]> {
   // Keep only letters, digits and spaces so the text is safe inside the filter expression.
-  const term = q.replace(/[^\p{L}\p{N} ]/gu, ' ').trim().slice(0, 60)
-  let query = need().from('venues').select('*').order('verified', { ascending: false }).order('name').limit(40)
-  if (term) query = query.or(`name.ilike.%${term}%,city.ilike.%${term}%,state.ilike.%${term}%,address.ilike.%${term}%`)
+  // Accents are stripped to match the database's search_text column ("meridien" finds "Méridien").
+  const term = q.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim().slice(0, 60)
+  let query = need().from('venues').select('*').order('verified', { ascending: false }).order('name').limit(60)
+  for (const word of term.split(/\s+/).filter(Boolean).slice(0, 5)) query = query.ilike('search_text', `%${word}%`)
   const { data, error } = await query
   if (error) throw new Error(error.message)
   return (data ?? []) as Venue[]

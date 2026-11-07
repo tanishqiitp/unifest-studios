@@ -102,7 +102,7 @@ export function VenueFinder({ onPick, onClose }: { onPick: (v: Venue, r: VenueRo
               </div>
             )}
             {list.map((v) => {
-              const big = [...v.rooms].sort((a, b) => b.w * b.l - a.w * a.l)[0]
+              const big = [...v.rooms].filter((r) => r.w > 0 && r.l > 0).sort((a, b) => b.w * b.l - a.w * a.l)[0]
               return (
                 <button key={v.id} onClick={() => setSel(v)} className={`w-full text-left px-5 py-3 border-b border-line hover:bg-raised ${sel?.id === v.id ? 'bg-raised' : ''}`}>
                   <div className="flex items-center gap-1.5 text-sm font-medium">
@@ -114,7 +114,7 @@ export function VenueFinder({ onPick, onClose }: { onPick: (v: Venue, r: VenueRo
                   </div>
                   <div className="mono text-[10px] text-dim mt-1">
                     {v.rooms.length} {v.rooms.length === 1 ? 'space' : 'spaces'}
-                    {big ? ` · largest ${big.w}×${big.l} m` : ''}
+                    {big ? ` · largest ${big.approx ? '≈' : ''}${big.w}×${big.l} m` : ''}
                   </div>
                 </button>
               )
@@ -158,7 +158,7 @@ function VenueDetail({ v, mine, onPick, onEdit, onDeleted }: { v: Venue; mine: b
           <h2 className="font-display text-2xl font-semibold tracking-tight mt-1 flex items-center gap-2">
             {v.name} {v.verified && <BadgeCheck size={18} aria-label="Verified" />}
           </h2>
-          <div className="text-xs text-dim mt-1">{[v.address, v.city, v.state, v.country].filter(Boolean).join(', ')}</div>
+          <div className="text-xs text-dim mt-1">{[v.address, v.city, v.state, v.country].filter((x, i) => x && (i === 0 || !v.address.toLowerCase().includes(x.toLowerCase()))).join(', ')}</div>
           {v.website && /^https?:\/\//.test(v.website) && (
             <a className="text-[11px] underline text-dim" href={v.website} target="_blank" rel="noreferrer noopener">
               {v.website.replace(/^https?:\/\//, '')}
@@ -190,7 +190,7 @@ function VenueDetail({ v, mine, onPick, onEdit, onDeleted }: { v: Venue; mine: b
           </div>
         )}
       </div>
-      {v.notes && <p className="text-xs text-dim mt-4 leading-relaxed whitespace-pre-line">{v.notes}</p>}
+      {v.notes && <Notes text={v.notes} />}
       <div className="label mt-8 mb-2">Spaces</div>
       {v.rooms.length === 0 && <p className="text-xs text-mute">No spaces listed yet.</p>}
       <div className="space-y-2">
@@ -199,13 +199,21 @@ function VenueDetail({ v, mine, onPick, onEdit, onDeleted }: { v: Venue; mine: b
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium">{r.name}</div>
               <div className="mono text-[11px] text-dim mt-0.5">
-                {r.w} × {r.l} m · {(r.w * r.l).toLocaleString('en-IN', { maximumFractionDigits: 0 })} m²{r.h ? ` · ${r.h} m ceiling` : ''}
+                {r.w > 0 && r.l > 0 ? (
+                  <>
+                    {r.approx ? '≈ ' : ''}
+                    {r.w} × {r.l} m · {(r.w * r.l).toLocaleString('en-IN', { maximumFractionDigits: 0 })} m²{r.approx ? ' (approx. size from published area)' : ''}
+                  </>
+                ) : (
+                  'Size not published'
+                )}
+                {r.h ? ` · ${r.h} m ceiling` : ''}
               </div>
               <div className="text-[10px] text-mute mt-0.5">
                 Theatre {fmtN(r.theatre)} · Banquet {fmtN(r.banquet)} · Standing {fmtN(r.standing)}
               </div>
             </div>
-            <button className="btn btn-primary" onClick={() => onPick(v, r)}>
+            <button className="btn btn-primary" disabled={!(r.w > 0 && r.l > 0)} title={r.w > 0 ? undefined : 'No size published for this space yet'} onClick={() => onPick(v, r)}>
               Use this space
             </button>
           </div>
@@ -318,5 +326,26 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
       <span className="label">{label}</span>
       <input className="field mt-1" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
     </label>
+  )
+}
+
+// Notes with "Sources: url url" turned into short links.
+function Notes({ text }: { text: string }) {
+  const [body, src] = text.split(/\nSources:\s*/)
+  const urls = (src ?? '').split(/\s+/).filter((u) => /^https?:\/\//.test(u))
+  return (
+    <div className="mt-4">
+      <p className="text-xs text-dim leading-relaxed whitespace-pre-line">{body}</p>
+      {urls.length > 0 && (
+        <div className="text-[11px] text-mute mt-1">
+          Sources:{' '}
+          {urls.map((u, i) => (
+            <a key={u} href={u} target="_blank" rel="noreferrer noopener" className="underline hover:text-white mr-2" title={u}>
+              {new URL(u).hostname.replace(/^www\./, '')} {i + 1}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
