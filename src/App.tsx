@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Armchair, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { AlertTriangle, Armchair, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -14,12 +14,17 @@ import { StageWorkspace } from './workspaces/Stage'
 import { TrussWorkspace } from './workspaces/Truss'
 import { DeliverWorkspace } from './workspaces/Deliver'
 import { SeatingWorkspace } from './workspaces/Seating'
+import { DecorWorkspace } from './workspaces/Decor'
+import { PlanWorkspace } from './workspaces/Plan'
+import { ClientFeedback } from './components/ClientFeedback'
 import { seatCount } from './lib/seating'
 import { Check, Modal, Num, Seg, Sel, Txt } from './components/ui'
 import { Home } from './components/Home'
 import { VenueFinder } from './components/VenueFinder'
 import { Guide } from './components/Guide'
 import { nanoid } from 'nanoid'
+import { briefToProject, parseBrief } from './lib/smartLayout'
+import { decorPreset, newDecor } from './lib/decor'
 import { useDevice, isCompact, type DevicePref } from './lib/device'
 
 // The 3D engine is large, so it loads only when someone opens a 3D view.
@@ -41,8 +46,10 @@ const TABS: { id: Workspace; label: string; short: string; kicker: string; icon:
   { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '03', icon: Spline, tip: 'Truss, hoists, lights and speakers, with live weights' },
   { id: 'led', label: 'LED Screens', short: 'LED', kicker: '04', icon: MonitorPlay, tip: 'Screen sizes, pixels, cabling and power' },
   { id: 'seating', label: 'Seating', short: 'Seats', kicker: '05', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
-  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '06', icon: Box, tip: 'See everything in 3D, render images and videos' },
-  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '07', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
+  { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '06', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
+  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '07', icon: Box, tip: 'See everything in 3D, render images and videos' },
+  { id: 'plan', label: 'Plan', short: 'Plan', kicker: '08', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
+  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '09', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
 ]
 
 export default function App() {
@@ -77,10 +84,11 @@ function SharedView() {
         </div>
         <div className="text-[11px] text-mute hidden sm:block">Interactive 3D preview · designed with Unifest Studios</div>
       </header>
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 relative">
         <Suspense fallback={<Loading3D />}>
           <Viewer project={p} compact />
         </Suspense>
+        {code && <ClientFeedback code={code} />}
       </div>
     </div>
   )
@@ -138,10 +146,12 @@ function Studio() {
             <Viz3DWorkspace />
           </Suspense>
         )}
+        {ui.workspace === 'decor' && <DecorWorkspace />}
+        {ui.workspace === 'plan' && <PlanWorkspace />}
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
-        {['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <Hud />}
-        {['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <ToolRail />}
-        {compact && ['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <PanelToggles />}
+        {['ground', 'stage', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <Hud />}
+        {['ground', 'stage', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <ToolRail />}
+        {compact && ['ground', 'stage', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <PanelToggles />}
         <Guide />
       </div>
       <WarningsBar />
@@ -466,6 +476,53 @@ function WarningsBar() {
   )
 }
 
+// "Describe your event" → a full starter layout, including decor and effects the brief mentions.
+function Brief({ onDone }: { onDone: () => void }) {
+  const [text, setText] = useState('')
+  const [notes, setNotes] = useState<string[]>([])
+  const go = () => {
+    const { project, notes } = briefToProject(text)
+    const { extras } = parseBrief(text)
+    const want = new Set(extras.decor ?? [])
+    const d = project.decor ?? []
+    if (want.has('mandap')) d.push(newDecor('mandap', project.venue.w / 2, Math.min(project.venue.l - 4, (project.decks.length ? Math.max(...project.decks.map((x) => x.y + x.l)) : 8) + 6)))
+    if (want.has('floral') || want.has('drapes')) d.push(...decorPreset(project, 'wedding-stage'))
+    if (want.has('cold pyro')) d.push(...decorPreset(project, 'pyro-front'))
+    if (want.has('smoke')) d.push(...decorPreset(project, 'smoke-wings'))
+    if (want.has('co2')) d.push(...decorPreset(project, 'co2-row'))
+    if (want.has('fireworks')) d.push(...decorPreset(project, 'fireworks-finale'))
+    if (want.has('confetti')) d.push(newDecor('confetti', project.venue.w / 2 - 4, 4), newDecor('confetti', project.venue.w / 2 + 4, 4))
+    if (want.has('flames')) d.push(newDecor('flame', project.venue.w / 2 - 8, 3), newDecor('flame', project.venue.w / 2 + 8, 3))
+    if (want.has('chandelier')) for (let i = 0; i < 4; i++) d.push(newDecor('chandelier', project.venue.w * (0.2 + i * 0.2), project.venue.l * 0.6))
+    if (want.has('photo booth')) d.push(newDecor('photo-booth', project.venue.w - 4, project.venue.l - 4))
+    project.decor = d
+    useStore.getState().setProject(project)
+    useStore.temporal.getState().clear()
+    setNotes(notes)
+    useStore.getState().notify('Layout built from your description. Check the notes and adjust anything.')
+    onDone()
+  }
+  return (
+    <div className="card p-3 glow">
+      <div className="label mb-1 flex items-center gap-1.5">
+        <Sparkles size={12} /> Describe your event
+      </div>
+      <textarea
+        className="field min-h-[72px] py-2"
+        placeholder="e.g. 500 guests sangeet on a lawn, 40x20 ft stage, round tables, 2 side screens, mandap, cold pyro and smoke"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && go()}
+      />
+      <button className="btn btn-primary w-full justify-center mt-2" disabled={!text.trim()} onClick={go}>
+        <Sparkles size={13} /> Build it for me
+      </button>
+      <p className="text-[10px] text-mute mt-1">Works in English or Hinglish ("500 log ki shaadi, mandap, lawn"). Runs in your browser; nothing is sent anywhere.</p>
+      {notes.length > 0 && <ul className="text-[10px] text-dim mt-1">{notes.map((n, i) => <li key={i}>· {n}</li>)}</ul>}
+    </div>
+  )
+}
+
 function Wizard() {
   const { setUI, setProject, notify } = useStore.getState()
   const prefill = useStore((s) => s.ui.wizardPrefill)
@@ -480,7 +537,8 @@ function Wizard() {
     <Modal title="New event" onClose={() => setUI({ wizardOpen: false, wizardPrefill: null })} wide>
       <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
         <div className="md:col-span-2 space-y-3">
-          <div className="label">Tell us about your event</div>
+          <Brief onDone={() => setUI({ wizardOpen: false, home: false, workspace: 'ground', wizardPrefill: null })} />
+          <div className="label pt-2">Or fill in the details</div>
           <Txt label="Event name" value={inp.name} onChange={(name) => setInp({ ...inp, name })} />
           <Sel label="Event type" value={inp.eventType} onChange={(eventType) => setInp({ ...inp, eventType: eventType as EventType })} options={EVENT_TYPES.map((e) => ({ value: e, label: e }))} />
           <Num label="Expected audience" value={inp.audience} onChange={(audience) => setInp({ ...inp, audience })} int step={100} min={20} />
@@ -580,7 +638,7 @@ function useShortcuts() {
       if (k === 'b' && ui.workspace === 'led') setUI({ tool: ui.tool === 'paint' ? 'select' : 'paint' })
       if (k === '?') setUI({ shortcutsOpen: true })
       if (k === 'escape') setUI({ tool: 'select' })
-      if (/^[1-7]$/.test(k)) setUI({ workspace: TABS[Number(k) - 1].id, tool: 'select' })
+      if (/^[1-9]$/.test(k)) setUI({ workspace: TABS[Number(k) - 1].id, tool: 'select' })
       if ((k === 'delete' || k === 'backspace') && ui.selection) {
         const { kind, id } = ui.selection
         mutate((p) => {

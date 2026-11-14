@@ -6,6 +6,7 @@ import type { GroundItem, Project, Table } from '../types'
 import { CHAIR, isSeated, seatPositions } from '../lib/seating'
 import { rigging, screenColumns, screenStats, TRUSS_INFO } from '../lib/calc'
 import { useSnap, useView } from './PlanCanvas'
+import { DecorNode } from './DecorNode'
 
 export const GROUND_STYLE: Record<GroundItem['kind'], { fill: string; stroke: string; name: string; tip: string }> = {
   crowd: { fill: '#ffffff10', stroke: '#5a5a5a', name: 'Standing crowd', tip: '2 people per m² (comfortable concert density).' },
@@ -24,7 +25,7 @@ export const GROUND_STYLE: Record<GroundItem['kind'], { fill: string; stroke: st
   label: { fill: '#00000000', stroke: '#3f3f3f', name: 'Label', tip: 'Free text note.' },
 }
 
-type Edit = 'ground' | 'stage' | 'truss' | 'seating'
+type Edit = 'ground' | 'stage' | 'truss' | 'seating' | 'decor'
 
 export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sightlines?: boolean; extra?: ReactNode }) {
   const p = useStore((s) => s.project)
@@ -50,8 +51,24 @@ export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sight
         <TrussNode key={t.id} id={t.id} editable={edit === 'truss'} dim={edit !== 'truss'} />
       ))}
       {edit === 'truss' && <RigOverlay project={p} />}
+      {(p.decor ?? []).map((d) => (
+        <DecorNode key={d.id} d={d} editable={edit === 'decor'} />
+      ))}
       {p.fixtures.map((f) => (
-        <Group key={f.id} x={f.x} y={f.y} listening={false} opacity={edit === 'truss' ? 1 : 0.5}>
+        <Group
+          key={f.id}
+          x={f.x}
+          y={f.y}
+          listening={edit === 'truss'}
+          opacity={edit === 'truss' ? 1 : 0.5}
+          onPointerDown={(e) => {
+            e.cancelBubble = true
+            useStore.getState().select({ kind: 'fixture', id: f.id })
+          }}
+        >
+          {edit === 'truss' && f.aim === 'fixed' && f.kind !== 'sub' && f.kind !== 'line-array' && (
+            <Line points={[0, 0, Math.sin(((f.pan ?? 0) * Math.PI) / 180) * Math.min(f.reach ?? 12, 12) * Math.sin(((f.tilt ?? 35) * Math.PI) / 180), Math.cos(((f.pan ?? 0) * Math.PI) / 180) * Math.min(f.reach ?? 12, 12) * Math.sin(((f.tilt ?? 35) * Math.PI) / 180)]} stroke={f.color || '#fff'} opacity={0.6} strokeWidth={1} dash={[4, 3]} strokeScaleEnabled={false} />
+          )}
           {f.kind === 'sub' ? (
             <Rect x={-0.35} y={-0.3} width={0.7} height={0.6} stroke="#a3a3a3" strokeWidth={1} strokeScaleEnabled={false} />
           ) : f.kind === 'line-array' ? (

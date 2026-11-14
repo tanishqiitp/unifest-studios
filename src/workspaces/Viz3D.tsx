@@ -14,6 +14,7 @@ import type { Fixture, GroundItem, Project, Screen, Table, Truss } from '../type
 import { fmt, screenColumns, screenStats, stageBounds, TRUSS_INFO, trussLength } from '../lib/calc'
 import { GROUND_LABELS } from '../lib/export/labels'
 import { CHAIR, isSeated, seatPositions } from '../lib/seating'
+import { DecorItems } from './Decor3D'
 
 RectAreaLightUniformsLib.init()
 
@@ -427,9 +428,9 @@ function Scene(props: SceneProps) {
       scene.fog = new THREE.Fog('#c3ced8', 120, 700)
     } else {
       scene.background = new THREE.Color('#000000')
-      scene.fog = new THREE.FogExp2('#000000', 0.0065)
+      scene.fog = new THREE.FogExp2('#000000', 0.0065 * (1 + (project.look?.haze ?? 0.3) * 1.5))
     }
-  }, [look, scene])
+  }, [look, scene, project.look?.haze])
 
   // Smooth camera moves between presets.
   const cameraFor = (p: Preset) => {
@@ -598,6 +599,7 @@ function Scene(props: SceneProps) {
         <ScreenMesh key={s.id} s={s} project={project} content={content} look={look} onInfo={onInfo} />
       ))}
       <Fixtures project={project} look={look} palette={palette} motion={motion} />
+      <DecorItems project={project} show={show} motion={motion} onInfo={onInfo} />
       {labels && <Labels project={project} look={look} />}
 
       {show && (
@@ -896,7 +898,8 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
     t.anisotropy = 8
     return t
   }, [s, st.pxW, st.pxH])
-  const base = content ?? img ?? pattern
+  const own = useContent(s.video ? s.video : null)
+  const base = own ?? content ?? img ?? pattern
   // One texture per column sharing the same image, so each column shows its slice.
   const texes = useMemo(
     () =>
@@ -919,7 +922,9 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
     if (v.readyState >= 2) for (const t of texes) t.needsUpdate = true
   })
   const virtual = new Set(s.virtual)
-  const glow = look === 'show' ? 1.6 : look === 'day' ? 1.15 : 1
+  const glow = (look === 'show' ? 1.6 : look === 'day' ? 1.15 : 1) * (s.brightness ?? 1)
+  const tilt = THREE.MathUtils.degToRad(s.tilt ?? 0)
+  const frameColor = s.frame === 'silver' ? '#c9ccd1' : s.frame === 'brand' ? (project.brand?.color ?? '#ffffff') : '#050505'
   const mid = cols[Math.floor(cols.length / 2)]
   const info = () =>
     onInfo({
@@ -939,7 +944,13 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
       onPointerOut={() => pointer(false)}
     >
       {cols.map((c, i) => (
-        <group key={i} position={[c.x, s.z + st.h / 2, c.y]} rotation-y={-c.angle}>
+        <group key={i} position={[c.x, s.z + st.h / 2, c.y]} rotation={[tilt, -c.angle, 0, 'YXZ']}>
+          {s.frame && s.frame !== 'none' && (
+            <mesh position={[0, 0, -0.14]}>
+              <boxGeometry args={[cw + (i === 0 || i === cols.length - 1 ? 0.3 : 0.001), st.h + 0.3, 0.04]} />
+              <meshStandardMaterial color={frameColor} metalness={s.frame === 'silver' ? 0.9 : 0.3} roughness={0.35} />
+            </mesh>
+          )}
           <mesh position={[0, 0, -0.07]} castShadow>
             <boxGeometry args={[cw, st.h, 0.12]} />
             <meshStandardMaterial color="#0b0b0b" metalness={0.6} roughness={0.5} />
@@ -997,7 +1008,7 @@ function StageDecks({ project, look, onInfo }: { project: Project; look: Look; o
   return (
     <group onClick={(e: ThreeEvent<MouseEvent>) => (e.stopPropagation(), info())} onPointerOver={() => pointer(true)} onPointerOut={() => pointer(false)}>
       {project.decks.map((d) => (
-        <mesh key={d.id} position={[d.x + d.w / 2, d.h / 2, d.y + d.l / 2]} material={mats} castShadow receiveShadow>
+        <mesh key={d.id} position={[d.x + d.w / 2, d.h / 2, d.y + d.l / 2]} material={d.color || d.skirt ? deckMats(d.color, d.skirt, mats) : mats} castShadow receiveShadow>
           <boxGeometry args={[d.w, d.h, d.l]} />
           {look === 'tech' && <Edges color="#888" />}
         </mesh>
@@ -1005,7 +1016,7 @@ function StageDecks({ project, look, onInfo }: { project: Project; look: Look; o
       {/* LED edge strip along the downstage edge */}
       {look === 'show' &&
         project.decks
-          .filter((d) => Math.abs(d.y + d.l - frontY) < 0.05)
+          .filter((d) => Math.abs(d.y + d.l - frontY) < 0.05 && d.edgeLight !== false)
           .map((d) => (
             <mesh key={`e-${d.id}`} position={[d.x + d.w / 2, d.h - 0.02, d.y + d.l + 0.006]}>
               <planeGeometry args={[d.w, 0.025]} />
@@ -1016,10 +1027,24 @@ function StageDecks({ project, look, onInfo }: { project: Project; look: Look; o
   )
 }
 
+// Decks with their own top or skirt colour share materials by colour.
+const deckMatCache = new Map<string, THREE.Material[]>()
+function deckMats(top: string | undefined, skirt: string | undefined, def: THREE.Material[]) {
+  const key = `${top}|${skirt}`
+  if (!deckMatCache.has(key)) {
+    const t = top ? new THREE.MeshStandardMaterial({ color: top, roughness: 0.5 }) : def[2]
+    const k = skirt ? new THREE.MeshStandardMaterial({ color: skirt, roughness: 0.95 }) : def[0]
+    deckMatCache.set(key, [k, k, t, k, k, k])
+  }
+  return deckMatCache.get(key)!
+}
+
 // ---------------------------------------------------------------- truss
 
 const aluminium = new THREE.MeshStandardMaterial({ color: '#c9ccd1', metalness: 0.95, roughness: 0.32 })
 const blackMetal = new THREE.MeshStandardMaterial({ color: '#1b1b1b', metalness: 0.7, roughness: 0.45 })
+const blackTruss = new THREE.MeshStandardMaterial({ color: '#141414', metalness: 0.6, roughness: 0.5 })
+const whiteTruss = new THREE.MeshStandardMaterial({ color: '#f2f2f2', metalness: 0.3, roughness: 0.4 })
 
 function rod(a: THREE.Vector3, b: THREE.Vector3, r: number) {
   const dir = b.clone().sub(a)
@@ -1070,6 +1095,7 @@ function TrussMesh({ t, onInfo }: { t: Truss; onInfo: (i: Info) => void }) {
   const len = Math.hypot(t.x2 - t.x1, t.y2 - t.y1)
   const ang = Math.atan2(t.y2 - t.y1, t.x2 - t.x1)
   const tri = t.type === 'tri30'
+  const metal = t.finish === 'black' ? blackTruss : t.finish === 'white' ? whiteTruss : aluminium
   const geom = useMemo(() => trussGeometry(len, size, tri), [len, size, tri])
   const towerGeom = useMemo(() => trussGeometry(t.height, size, tri), [t.height, size, tri])
   useEffect(() => () => (geom.dispose(), towerGeom.dispose()), [geom, towerGeom])
@@ -1079,14 +1105,14 @@ function TrussMesh({ t, onInfo }: { t: Truss; onInfo: (i: Info) => void }) {
   }
   return (
     <group onClick={click} onPointerOver={() => pointer(true)} onPointerOut={() => pointer(false)}>
-      <mesh geometry={geom} material={aluminium} position={[t.x1, t.height + size / 2, t.y1]} rotation-y={-ang} castShadow />
+      <mesh geometry={geom} material={metal} position={[t.x1, t.height + size / 2, t.y1]} rotation-y={-ang} castShadow />
       {t.legs &&
         [
           [t.x1, t.y1],
           [t.x2, t.y2],
         ].map(([x, y], i) => (
           <group key={i} position={[x, 0, y]}>
-            <mesh geometry={towerGeom} material={aluminium} rotation-z={Math.PI / 2} castShadow />
+            <mesh geometry={towerGeom} material={metal} rotation-z={Math.PI / 2} castShadow />
             <mesh position={[0, 0.02, 0]} material={blackMetal} receiveShadow>
               <boxGeometry args={[1.2, 0.04, 1.2]} />
             </mesh>
@@ -1587,7 +1613,7 @@ function Fixtures({ project, look, palette, motion }: { project: Project; look: 
       {project.fixtures.map((f, i) => {
         if (f.kind === 'sub') return <Sub key={f.id} f={f} />
         if (f.kind === 'line-array') return <LineArray key={f.id} f={f} cx={cx} />
-        return <Light key={f.id} f={f} i={i} on={look === 'show'} palette={palette} motion={motion} />
+        return <Light key={f.id} f={f} i={i} on={look === 'show'} palette={palette} motion={motion} haze={project.look?.haze ?? 0.3} />
       })}
     </>
   )
@@ -1636,16 +1662,20 @@ function LineArray({ f, cx }: { f: Fixture; cx: number }) {
   )
 }
 
-function Light({ f, i, on, palette, motion }: { f: Fixture; i: number; on: boolean; palette: Palette; motion: boolean }) {
+function Light({ f, i, on, palette, motion, haze }: { f: Fixture; i: number; on: boolean; palette: Palette; motion: boolean; haze: number }) {
   const head = useRef<THREE.Group>(null)
   const beam = useRef<THREE.Mesh>(null)
   const pool = useRef<THREE.Mesh>(null)
   const lens = useRef<THREE.MeshBasicMaterial>(null)
-  const half = HALF_ANGLE[f.kind]
+  const half = f.beam ? THREE.MathUtils.degToRad(f.beam / 2) : HALF_ANGLE[f.kind]
+  const level = f.intensity ?? 1
+  const reach = f.reach ?? 45
+  const fixed = f.aim === 'fixed'
+  const own = useMemo(() => (f.color ? new THREE.Color(f.color) : null), [f.color])
   const mat = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        uniforms: { color: { value: new THREE.Color() }, opacity: { value: f.kind === 'par' ? 0.12 : f.kind === 'beam' ? 0.75 : 0.32 } },
+        uniforms: { color: { value: new THREE.Color() }, opacity: { value: (f.kind === 'par' ? 0.12 : f.kind === 'beam' ? 0.75 : 0.32) * (0.4 + haze * 1.2) * level } },
         vertexShader: beamVertex,
         fragmentShader: beamFragment,
         transparent: true,
@@ -1653,7 +1683,7 @@ function Light({ f, i, on, palette, motion }: { f: Fixture; i: number; on: boole
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
       }),
-    [f.kind],
+    [f.kind, haze, level],
   )
   const poolMat = useMemo(() => new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), [])
   useEffect(() => () => (mat.dispose(), poolMat.dispose()), [mat, poolMat])
@@ -1665,7 +1695,10 @@ function Light({ f, i, on, palette, motion }: { f: Fixture; i: number; on: boole
     const fan = ((i % 7) - 3) * 0.2
     let pan: number
     let tilt: number
-    if (f.kind === 'par') {
+    if (fixed) {
+      pan = THREE.MathUtils.degToRad(f.pan ?? 0)
+      tilt = THREE.MathUtils.degToRad(f.tilt ?? 35)
+    } else if (f.kind === 'par') {
       // Pars wash back towards the stage.
       pan = Math.PI + fan * 0.5
       tilt = 0.45
@@ -1680,7 +1713,9 @@ function Light({ f, i, on, palette, motion }: { f: Fixture; i: number; on: boole
     tmp.d.set(Math.sin(pan) * Math.sin(tilt), -Math.cos(tilt), Math.cos(pan) * Math.sin(tilt)).normalize()
     tmp.q.setFromUnitVectors(tmp.down, tmp.d)
     head.current?.quaternion.copy(tmp.q)
-    paletteColor(palette, i, t, tmp.c)
+    if (own) tmp.c.copy(own)
+    else paletteColor(palette, i, t, tmp.c)
+    tmp.c.multiplyScalar(level)
     if (f.kind === 'blinder') {
       const flash = motion ? Math.pow(Math.max(0, Math.sin(t * 3.3 + ph)), 12) : 0.3
       lens.current?.color.setRGB(1 + flash * 5, 0.85 + flash * 4, 0.6 + flash * 3)
@@ -1688,10 +1723,10 @@ function Light({ f, i, on, palette, motion }: { f: Fixture; i: number; on: boole
     }
     lens.current?.color.copy(tmp.c).multiplyScalar(4)
     mat.uniforms.color.value.copy(tmp.c)
-    const len = Math.min(45, tmp.d.y < -0.05 ? (f.z - 0.3) / -tmp.d.y : 45)
+    const len = Math.min(reach, tmp.d.y < -0.05 ? (f.z - 0.3) / -tmp.d.y : reach)
     if (beam.current) beam.current.scale.set(Math.max(0.06, len * Math.tan(half)), len, Math.max(0.06, len * Math.tan(half)))
     if (pool.current) {
-      const hits = tmp.d.y < -0.05 && len < 44
+      const hits = tmp.d.y < -0.05 && len < reach - 0.5
       pool.current.visible = hits
       if (hits) {
         const r = Math.max(0.5, len * Math.tan(half) * 1.3)

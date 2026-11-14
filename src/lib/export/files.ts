@@ -262,15 +262,26 @@ function mergeDecks(decks: Deck[]): Deck[] {
   return out.map((d, i) => ({ ...d, id: `d${i}` }))
 }
 
-// Read-only copy for client links: no images, short ids, merged decks, default values left out.
-export function liteProject(p: Project): Project {
+// Read-only copy for client links: short ids, merged decks, default values left out.
+// Commercial data (quote, crew, run of show, checklist) never goes to the client.
+// Images only travel in short links (stored in the database), never in the long #view= links.
+export function liteProject(p: Project, images = false): Project {
   const short = <T extends { id: string }>(a: T[], k: string) => a.map((x, i) => ({ ...x, id: `${k}${i}` }))
   const ids = new Map(p.screens.map((s, i) => [s.id, `s${i}`]))
   const lite: Project = {
     ...p,
     id: undefined,
     venue: { ...p.venue, image: undefined },
-    screens: p.screens.map((s) => ({ ...s, id: ids.get(s.id)!, mirrorOf: s.mirrorOf ? ids.get(s.mirrorOf) : undefined, image: undefined })),
+    screens: p.screens.map((s) => ({ ...s, id: ids.get(s.id)!, mirrorOf: s.mirrorOf ? ids.get(s.mirrorOf) : undefined, image: images ? s.image : undefined })),
+    // Imported models live only in the designer's browser, so clients don't get them.
+    decor: (p.decor ?? []).filter((d) => d.kind !== 'model').map((d, i) => ({ ...d, id: `x${i}`, image: images ? d.image : undefined })),
+    brand: p.brand ? { ...p.brand, logo: images ? p.brand.logo : undefined } : undefined,
+    quote: undefined,
+    crew: undefined,
+    cues: undefined,
+    checklist: undefined,
+    comments: undefined,
+    approval: undefined,
     decks: mergeDecks(p.decks),
     ground: short(p.ground, 'g'),
     truss: short(p.truss, 't'),

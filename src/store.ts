@@ -8,7 +8,7 @@ import { cloudEnabled, pushProject, useAuth } from './lib/cloud'
 import { nanoid } from 'nanoid'
 import { withSeating } from './lib/seating'
 
-export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture' | 'table'; id: string } | null
+export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture' | 'table' | 'decor' | 'comment'; id: string } | null
 export type LedOverlay = 'none' | 'data' | 'power'
 export type Tool = 'select' | 'pan' | 'paint' | 'measure' | 'draw-truss' | 'hoist'
 

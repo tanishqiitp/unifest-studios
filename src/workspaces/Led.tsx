@@ -732,6 +732,22 @@ function ScreenProps({ s }: { s: Screen }) {
           ]}
         />
         {s.shape !== 'flat' && <Num label="Angle between columns" value={s.curveDeg} onChange={(curveDeg) => up({ curveDeg })} unit="°" step={0.5} min={0} max={15} tip="Curved LED cabinets lock at fixed angles, usually 0–10° each." />}
+        <div className="grid grid-cols-2 gap-2">
+          <Num label="Forward tilt" value={s.tilt ?? 0} onChange={(tilt) => up({ tilt })} unit="°" step={1} min={-15} max={15} tip="Lean the top of the screen towards the audience, as flown screens often are, so the back rows see it straight on." />
+          <Num label="Brightness in 3D" value={Math.round((s.brightness ?? 1) * 100)} onChange={(v) => up({ brightness: v / 100 })} unit="%" step={10} min={20} max={200} int />
+        </div>
+        <Sel
+          label="Frame"
+          value={s.frame ?? 'none'}
+          onChange={(frame) => up({ frame })}
+          options={[
+            { value: 'none', label: 'No frame' },
+            { value: 'black', label: 'Black masking' },
+            { value: 'silver', label: 'Silver frame' },
+            { value: 'brand', label: 'Brand colour' },
+          ]}
+          tip="A border around the screen: black masking cloth, a metal frame, or your brand colour."
+        />
       </Section>
 
       <Section title="Symmetry & content">
@@ -782,6 +798,16 @@ function ScreenProps({ s }: { s: Screen }) {
             </button>
           )}
         </div>
+        <label className="block">
+          <span className="label">Backdrop video link</span>
+          <input
+            className="field mt-1"
+            placeholder="https://…/loop.mp4"
+            value={s.video ?? ''}
+            onChange={(e) => up({ video: e.target.value.trim() || undefined })}
+          />
+        </label>
+        <p className="text-[10px] text-mute leading-relaxed">Plays on this screen in 3D. Use a direct .mp4 or .webm link that allows embedding. To try a video from this computer without uploading it, use "Play video" in the 3D view.</p>
       </Section>
 
       {mode === 'pro' && (

@@ -6,7 +6,7 @@ import type { Deck, Project } from '../types'
 import { PlanCanvas } from '../components/PlanCanvas'
 import { TopView } from '../components/TopView'
 import { fmt, stageBounds } from '../lib/calc'
-import { Num, Section, Sel, Stat } from '../components/ui'
+import { Check, Num, Section, Sel, Stat } from '../components/ui'
 
 const DECKS = [
   { value: '2x1', label: '2 × 1 m deck', w: 2, l: 1 },
@@ -124,6 +124,7 @@ export function StageWorkspace() {
               <Num label="Depth" value={deck.l} onChange={(l) => updDeck(deck.id, { l })} unit="m" step={0.5} min={0.5} />
               <Num label="Height" value={deck.h} onChange={(h) => updDeck(deck.id, { h })} unit="m" step={0.1} min={0.1} />
             </div>
+            <DeckLook ids={[deck.id]} d={deck} />
           </Section>
         ) : null}
         <StageSummary project={project} onShift={shiftAll} />
@@ -148,6 +149,16 @@ function StageSummary({ project, onShift }: { project: Project; onShift: (dx: nu
           <Stat label="Decks" value={project.decks.length} />
           <Stat label="Skirting" value={`${fmt(sb.w + sb.l * 2, 1)} m`} sub="front + sides" />
         </div>
+        <Num
+          label="Stage width"
+          value={+sb.w.toFixed(2)}
+          onChange={(w) => mutate((p) => resizeStage(p, w, sb.l))}
+          unit="m"
+          step={0.5}
+          min={2}
+          tip="Stretches the whole stage, keeping it centred. Deck sizes change to match; check they are standard sizes before ordering."
+        />
+        <Num label="Stage depth" value={+sb.l.toFixed(2)} onChange={(l) => mutate((p) => resizeStage(p, sb.w, l))} unit="m" step={0.5} min={1} />
         <Num label="Set all main decks to height" value={sb.h} onChange={(h) => mutate((p) => p.decks.forEach((d) => d.h >= sb.h - 0.01 && (d.h = h)))} unit="m" step={0.1} min={0.1} />
         <div>
           <div className="text-[11px] text-dim mb-1">Move whole stage</div>
@@ -167,6 +178,9 @@ function StageSummary({ project, onShift }: { project: Project; onShift: (dx: nu
           </div>
         </div>
       </Section>
+      <Section title="Stage look">
+        <DeckLook ids={project.decks.map((d) => d.id)} d={project.decks[0]} />
+      </Section>
       <Section title="Deck list">
         {[...counts].map(([k, n]) => (
           <div key={k} className="flex justify-between text-xs mono">
@@ -176,6 +190,47 @@ function StageSummary({ project, onShift }: { project: Project; onShift: (dx: nu
         ))}
       </Section>
     </>
+  )
+}
+
+// Scale every deck about the stage's centre line and front edge.
+function resizeStage(p: Project, W: number, L: number) {
+  const sb = stageBounds(p)
+  if (!sb || W <= 0 || L <= 0) return
+  const kx = W / sb.w
+  const ky = L / sb.l
+  const cx = sb.x + sb.w / 2
+  const front = sb.y + sb.l
+  for (const d of p.decks) {
+    d.x = +(cx + (d.x - cx) * kx).toFixed(3)
+    d.w = +(d.w * kx).toFixed(3)
+    d.y = +(front + (d.y - front) * ky).toFixed(3)
+    d.l = +(d.l * ky).toFixed(3)
+  }
+}
+
+const SKIRTS = ['#060606', '#f5f0e6', '#7a0f1f', '#1b2a5a', '#c9a14a']
+
+function DeckLook({ ids, d }: { ids: string[]; d: Deck }) {
+  const { mutate } = useStore.getState()
+  const set = (patch: Partial<Deck>) => mutate((p) => p.decks.forEach((x) => ids.includes(x.id) && Object.assign(x, patch)))
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-xs">
+        <span className="label">Floor colour</span>
+        <input type="color" value={d.color ?? '#151515'} onChange={(e) => set({ color: e.target.value })} className="h-7 w-14 bg-transparent border border-line rounded" />
+      </div>
+      <div className="flex items-center justify-between text-xs">
+        <span className="label">Skirt colour</span>
+        <div className="flex gap-1 items-center">
+          {SKIRTS.map((c) => (
+            <button key={c} className="h-5 w-5 rounded border border-line" style={{ background: c }} onClick={() => set({ skirt: c })} title={c} />
+          ))}
+          <input type="color" value={d.skirt ?? '#060606'} onChange={(e) => set({ skirt: e.target.value })} className="h-6 w-8 bg-transparent border border-line rounded" />
+        </div>
+      </div>
+      <Check label="LED strip on the front edge" checked={d.edgeLight !== false} onChange={(edgeLight) => set({ edgeLight })} />
+    </div>
   )
 }
 

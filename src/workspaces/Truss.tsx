@@ -21,6 +21,7 @@ export function TrussWorkspace() {
   const rig = rigging(project)
   const truss = ui.selection?.kind === 'truss' ? project.truss.find((t) => t.id === ui.selection!.id) : undefined
   const hoist = ui.selection?.kind === 'hoist' ? project.hoists.find((h) => h.id === ui.selection!.id) : undefined
+  const fixture = ui.selection?.kind === 'fixture' ? project.fixtures.find((f) => f.id === ui.selection!.id) : undefined
 
   const preset = (kind: 'goal' | 'roof' | 'front') =>
     mutate((p) => {
@@ -154,6 +155,7 @@ export function TrussWorkspace() {
       </div>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {truss && <TrussProps t={truss} />}
+        {fixture && <FixtureProps f={fixture} />}
         {hoist && (
           <Section
             title="Chain hoist"
@@ -239,6 +241,17 @@ function TrussProps({ t }: { t: Truss }) {
     >
       <Sel label="Type" value={t.type} onChange={(type) => up({ type })} options={(Object.keys(TRUSS_INFO) as TrussType[]).map((k) => ({ value: k, label: TRUSS_INFO[k].name }))} />
       <Num label="Trim height" value={t.height} onChange={(height) => up({ height })} unit="m" step={0.5} min={1} />
+      <Sel
+        label="Finish"
+        value={t.finish ?? 'silver'}
+        onChange={(finish) => up({ finish })}
+        options={[
+          { value: 'silver', label: 'Silver aluminium' },
+          { value: 'black', label: 'Black (stage black)' },
+          { value: 'white', label: 'White (weddings, launches)' },
+        ]}
+      />
+      <AimAll t={t} />
       <Check label="Ground-support towers at both ends" checked={t.legs} onChange={(legs) => up({ legs })} tip="Towers stand on the floor and lift the truss: use them when there is no roof to hang motors from." />
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Length" value={`${fmt(len, 2)} m`} />
@@ -262,5 +275,117 @@ function TrussProps({ t }: { t: Truss }) {
         <div className="mono">{[...counts].map(([l, n]) => `${n}× ${l} m`).join(' · ')}</div>
       </div>
     </Section>
+  )
+}
+
+const BEAM: Record<string, number> = { 'moving-head': 16, beam: 4, par: 36, blinder: 60 }
+
+// Pan, tilt, beam, reach and colour for one light. Lights left on "Auto" move with the show in 3D.
+function FixtureProps({ f }: { f: Fixture }) {
+  const { mutate, select } = useStore.getState()
+  const info = FIXTURE_INFO[f.kind]
+  const up = (patch: Partial<Fixture>) => mutate((p) => Object.assign(p.fixtures.find((x) => x.id === f.id)!, patch))
+  const light = f.kind !== 'sub' && f.kind !== 'line-array'
+  return (
+    <Section
+      title={info.name}
+      right={
+        <button className="btn btn-icon h-7 w-7" onClick={() => (mutate((p) => void (p.fixtures = p.fixtures.filter((x) => x.id !== f.id))), select(null))}>
+          <Trash2 size={13} />
+        </button>
+      }
+    >
+      <div className="grid grid-cols-3 gap-2">
+        <Num label="X" value={f.x} onChange={(x) => up({ x })} unit="m" step={0.25} />
+        <Num label="Y" value={f.y} onChange={(y) => up({ y })} unit="m" step={0.25} />
+        <Num label="Height" value={f.z} onChange={(z) => up({ z })} unit="m" step={0.25} min={0} />
+      </div>
+      {light && (
+        <>
+          <Sel
+            label="Aim"
+            value={f.aim ?? 'auto'}
+            onChange={(aim) => up({ aim, ...(aim === 'fixed' ? { pan: f.pan ?? 0, tilt: f.tilt ?? 35 } : {}) })}
+            options={[
+              { value: 'auto', label: 'Auto: moves with the show' },
+              { value: 'fixed', label: 'Fixed: aim it myself' },
+            ]}
+          />
+          {f.aim === 'fixed' && (
+            <>
+              <Slider label="Pan" value={f.pan ?? 0} min={-180} max={180} unit="°" onChange={(pan) => up({ pan })} hint="0° = towards the audience, + = audience right" />
+              <Slider label="Tilt" value={f.tilt ?? 35} min={0} max={110} unit="°" onChange={(tilt) => up({ tilt })} hint="0° = straight down, 90° = level" />
+            </>
+          )}
+          <Slider label="Beam angle" value={f.beam ?? BEAM[f.kind] ?? 16} min={2} max={70} unit="°" onChange={(beam) => up({ beam })} />
+          <Slider label="Reach" value={f.reach ?? 45} min={3} max={80} unit="m" onChange={(reach) => up({ reach })} hint="How far the beam travels" />
+          <Slider label="Intensity" value={Math.round((f.intensity ?? 1) * 100)} min={0} max={100} unit="%" onChange={(v) => up({ intensity: v / 100 })} />
+          <div className="flex items-center justify-between text-xs">
+            <span className="label">Colour</span>
+            <div className="flex items-center gap-1">
+              {['#ffffff', '#ffb35c', '#ff2d55', '#3d7bff', '#22d3ee', '#a855f7', '#22c55e'].map((c) => (
+                <button key={c} className={`h-5 w-5 rounded-full border ${f.color === c ? 'border-white' : 'border-line'}`} style={{ background: c }} onClick={() => up({ color: c })} />
+              ))}
+              <button className={`h-5 px-1.5 rounded text-[10px] border ${!f.color ? 'border-white' : 'border-line'}`} onClick={() => up({ color: undefined })}>
+                Show
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+      <p className="text-[10px] text-mute">{info.weight} kg · {info.watts} W</p>
+    </Section>
+  )
+}
+
+function Slider({ label, value, min, max, unit, onChange, hint }: { label: string; value: number; min: number; max: number; unit: string; onChange: (v: number) => void; hint?: string }) {
+  return (
+    <label className="block">
+      <div className="flex justify-between text-xs">
+        <span className="label">{label}</span>
+        <span className="mono text-[11px]">
+          {Math.round(value)}
+          {unit}
+        </span>
+      </div>
+      <input type="range" min={min} max={max} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-white" />
+      {hint && <div className="text-[10px] text-mute">{hint}</div>}
+    </label>
+  )
+}
+
+// Aim every light on a truss at once: a fan, a straight wash or a crossing pattern.
+function AimAll({ t }: { t: Truss }) {
+  const { mutate } = useStore.getState()
+  const on = (f: Fixture) => Math.abs(f.z - t.height) < 0.01 && Math.min(t.x1, t.x2) - 0.1 <= f.x && f.x <= Math.max(t.x1, t.x2) + 0.1 && Math.min(t.y1, t.y2) - 0.1 <= f.y && f.y <= Math.max(t.y1, t.y2) + 0.1 && f.kind !== 'line-array' && f.kind !== 'sub'
+  const aim = (k: 'fan' | 'straight' | 'cross' | 'auto') =>
+    mutate((p) => {
+      const list = p.fixtures.filter(on)
+      list.forEach((f, i) => {
+        const u = list.length > 1 ? i / (list.length - 1) - 0.5 : 0
+        if (k === 'auto') return void (f.aim = 'auto')
+        f.aim = 'fixed'
+        f.tilt = 40
+        f.pan = k === 'fan' ? u * 70 : k === 'cross' ? (i % 2 ? 1 : -1) * 30 : 0
+      })
+    })
+  return (
+    <div>
+      <div className="label mb-1">Aim all lights on this truss</div>
+      <div className="grid grid-cols-4 gap-1">
+        <button className="btn justify-center text-[11px]" onClick={() => aim('fan')}>
+          Fan
+        </button>
+        <button className="btn justify-center text-[11px]" onClick={() => aim('straight')}>
+          Straight
+        </button>
+        <button className="btn justify-center text-[11px]" onClick={() => aim('cross')}>
+          Cross
+        </button>
+        <button className="btn justify-center text-[11px]" onClick={() => aim('auto')}>
+          Auto
+        </button>
+      </div>
+    </div>
   )
 }

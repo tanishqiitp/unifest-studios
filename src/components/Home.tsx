@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Box, Building2, Users, Cloud, CloudUpload, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2 } from 'lucide-react'
+import { ArrowRight, Box, Building2, Users, Cloud, CloudUpload, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2, Sparkles, ClipboardList } from 'lucide-react'
 import { useStore } from '../store'
 import type { Project } from '../types'
 import { screenColumns, screenStats } from '../lib/calc'
@@ -179,7 +179,7 @@ export function Home() {
           </div>
         </section>
 
-        <section className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 pb-12">
+        <section className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2 pb-12">
           {(
             [
               [<Layers size={15} key="i" />, 'Ground plan', 'Zones, capacity, sightlines'],
@@ -187,7 +187,9 @@ export function Home() {
               [<Ruler size={15} key="i" />, 'Truss & rigging', 'Live kg per hoist, auto-rig'],
               [<MonitorPlay size={15} key="i" />, 'LED screens', 'Pixels, data, 3-phase power'],
               [<Users size={15} key="i" />, 'Seating', 'Tables, guests, meals'],
+              [<Sparkles size={15} key="i" />, 'Decor & FX', 'Mandaps, pyro, sponsors, Blender models'],
               [<Box size={15} key="i" />, '3D visualizer', 'Night show, renders, video'],
+              [<ClipboardList size={15} key="i" />, 'Plan', 'GST quote, run of show, crew, permits'],
               [<FileText size={15} key="i" />, 'Deliver', 'Client link, PDF, DXF, XML'],
             ] as const
           ).map(([icon, t, s], i) => (

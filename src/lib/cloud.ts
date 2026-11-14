@@ -81,7 +81,7 @@ export async function pushProject(p: Project) {
   const { error } = await db.from('projects').upsert(projectRow(p))
   if (error) throw new Error(error.message)
   // Keep any client link for this project showing the latest design.
-  await db.from('shares').update({ data: liteProject(p), updated_at: new Date().toISOString() }).eq('project_id', p.id)
+  await db.from('shares').update({ data: liteProject(p, true), updated_at: new Date().toISOString() }).eq('project_id', p.id)
 }
 
 export async function listCloudProjects(): Promise<CloudEntry[]> {
@@ -118,7 +118,7 @@ export async function ensureShare(p: Project): Promise<string> {
   const db = need()
   const { data: existing, error } = await db.from('shares').select('code').eq('project_id', p.id!).maybeSingle()
   if (error) throw new Error(error.message)
-  const data = liteProject(p)
+  const data = liteProject(p, true)
   if (existing) {
     await db.from('shares').update({ data, updated_at: new Date().toISOString() }).eq('code', existing.code)
     return existing.code
@@ -142,6 +142,35 @@ export async function fetchShare(code: string): Promise<Project | null> {
   const { data, error } = await supabase.rpc('get_share', { share_code: code })
   if (error || !data) return null
   return restoreDefaults(data as Project)
+}
+
+// ---------- client feedback on short links ----------
+
+export interface Feedback {
+  id: string
+  share_code: string
+  kind: 'comment' | 'approval'
+  status: 'approved' | 'changes' | null
+  author: string
+  body: string
+  created_at: string
+}
+
+export async function addFeedback(code: string, f: { kind: 'comment' | 'approval'; author: string; body: string; status?: 'approved' | 'changes' }) {
+  const { error } = await need().rpc('add_feedback', { share_code: code, kind: f.kind, author: f.author, body: f.body, status: f.status ?? null })
+  if (error) throw new Error(error.message)
+}
+
+// Newest first, for every link made from this project.
+export async function listFeedback(projectId: string): Promise<Feedback[]> {
+  const db = need()
+  const { data: shares, error } = await db.from('shares').select('code').eq('project_id', projectId)
+  if (error) throw new Error(error.message)
+  const codes = (shares ?? []).map((s) => s.code)
+  if (!codes.length) return []
+  const res = await db.from('feedback').select('*').in('share_code', codes).order('created_at', { ascending: false })
+  if (res.error) throw new Error(res.error.message)
+  return res.data as Feedback[]
 }
 
 // ---------- venue library ----------
