@@ -238,7 +238,7 @@ function ScreenNode({ s, project, selected }: { s: Screen; project: Project; sel
           }
         })
       }}
-      onMouseDown={(e) => {
+      onPointerDown={(e) => {
         select({ kind: 'screen', id: locked ? s.mirrorOf! : s.id })
         if (ui.tool === 'paint' && !locked) {
           e.cancelBubble = true
@@ -249,10 +249,10 @@ function ScreenNode({ s, project, selected }: { s: Screen; project: Project; sel
           setPaint(applyPaint(idx, base))
         }
       }}
-      onMouseMove={(e) => {
+      onPointerMove={(e) => {
         if (painting.current && paint) setPaint(applyPaint(cellAt(e.currentTarget), paint))
       }}
-      onMouseUp={() => {
+      onPointerUp={() => {
         if (painting.current && paint) {
           const next = [...paint.set].sort((a, b) => a - b)
           mutate((p) => {
@@ -263,7 +263,7 @@ function ScreenNode({ s, project, selected }: { s: Screen; project: Project; sel
         painting.current = false
         setPaint(null)
       }}
-      onMouseLeave={() => {
+      onPointerLeave={() => {
         if (painting.current && paint) {
           const next = [...paint.set].sort((a, b) => a - b)
           mutate((p) => {
@@ -418,12 +418,12 @@ function AddHandles({ s, w, h }: { s: Screen; w: number; h: number }) {
           key={d}
           x={x}
           y={y}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
             e.cancelBubble = true
             add(d)
           }}
-          onMouseEnter={(e) => (e.target.getStage()!.container().style.cursor = 'pointer')}
-          onMouseLeave={(e) => (e.target.getStage()!.container().style.cursor = '')}
+          onPointerEnter={(e) => (e.target.getStage()!.container().style.cursor = 'pointer')}
+          onPointerLeave={(e) => (e.target.getStage()!.container().style.cursor = '')}
         >
           <Rect x={-r} y={-r} width={r * 2} height={r * 2} cornerRadius={r} fill="#000" stroke="#fff" strokeWidth={1} strokeScaleEnabled={false} />
           <Text x={-r} y={-r} width={r * 2} height={r * 2} align="center" verticalAlign="middle" text="+" fontSize={r * 1.6} fill="#fff" listening={false} />

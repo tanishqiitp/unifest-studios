@@ -49,14 +49,14 @@ export function DeliverWorkspace() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-6xl mx-auto px-8 py-10 fade-in">
-        <div className="flex items-end justify-between gap-6 mb-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-8 py-6 sm:py-10 fade-in">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
           <div>
             <div className="label">Deliver</div>
             <h1 className="font-display text-3xl font-semibold tracking-tight mt-1">{project.name}</h1>
             <p className="text-sm text-dim mt-1">Present it to your client. Hand it to your crew.</p>
           </div>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Kpi label="Pixels" value={`${t.pxW}×${t.pxH}`} />
             <Kpi label="LED area" value={`${fmt(t.ledArea, 1)} m²`} />
             <Kpi label="Weight" value={`${Math.round(t.weight)} kg`} />
@@ -64,7 +64,7 @@ export function DeliverWorkspace() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div>
             <h2 className="font-display text-lg font-semibold mb-1">Share with client</h2>
             <p className="text-xs text-mute mb-4">Present and sell your proposal.</p>

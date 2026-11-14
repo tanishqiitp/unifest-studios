@@ -65,19 +65,18 @@ export function PlanCanvas({ bounds, grid, children, apiRef, onBackground, onWor
     setView({ scale, ox: (size.w - bounds.w * scale) / 2 - bounds.x * scale, oy: (size.h - bounds.h * scale) / 2 - bounds.y * scale })
   }, [bounds.x, bounds.y, bounds.w, bounds.h, size.w, size.h])
 
+  // Keep the plan fitted while the canvas settles or the device rotates, until the user zooms or pans.
   useEffect(() => {
-    if (!fitted.current && size.w > 100) {
-      fit()
-      fitted.current = true
-    }
-  }, [fit, size.w])
+    if (!fitted.current && size.w > 100) fit()
+  }, [fit, size.w, size.h])
+  const userMoved = () => void (fitted.current = true)
 
-  const zoomAt = (f: number, cx = size.w / 2, cy = size.h / 2) =>
+  const zoomAt = (f: number, cx = size.w / 2, cy = size.h / 2) => (userMoved(),
     setView((v) => {
       const scale = Math.min(400, Math.max(1, v.scale * f))
       const k = scale / v.scale
       return { scale, ox: cx - (cx - v.ox) * k, oy: cy - (cy - v.oy) * k }
-    })
+    }))
 
   useImperativeHandle(apiRef, () => ({ fit, zoom: (f) => zoomAt(f), stage: () => stageRef.current }))
 
@@ -93,6 +92,31 @@ export function PlanCanvas({ bounds, grid, children, apiRef, onBackground, onWor
       window.removeEventListener('keyup', up)
     }
   }, [])
+
+  // Two-finger pinch zooms and pans on phones and tablets.
+  const pinch = useRef<{ d: number; cx: number; cy: number } | null>(null)
+  const touchMove = (ev: TouchEvent) => {
+    if (ev.touches.length !== 2) return
+    ev.preventDefault()
+    const r = wrap.current!.getBoundingClientRect()
+    const [a, b] = [ev.touches[0], ev.touches[1]]
+    const cx = (a.clientX + b.clientX) / 2 - r.left
+    const cy = (a.clientY + b.clientY) / 2 - r.top
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+    const last = pinch.current
+    pinch.current = { d, cx, cy }
+    userMoved()
+    if (!last) {
+      stageRef.current?.find('*').forEach((n) => n.isDragging() && n.stopDrag())
+      if (stageRef.current?.isDragging()) stageRef.current.stopDrag()
+      return
+    }
+    setView((v) => {
+      const scale = Math.min(400, Math.max(1, (v.scale * d) / Math.max(last.d, 1)))
+      const k = scale / v.scale
+      return { scale, ox: cx - (last.cx - v.ox) * k, oy: cy - (last.cy - v.oy) * k }
+    })
+  }
 
   const panning = tool === 'pan' || spaceDown
   const toWorld = () => {
@@ -114,7 +138,7 @@ export function PlanCanvas({ bounds, grid, children, apiRef, onBackground, onWor
 
   return (
     <ViewCtx.Provider value={view}>
-      <div ref={wrap} className="absolute inset-0" style={{ cursor: panning ? 'grab' : tool === 'measure' ? 'crosshair' : cursor }}>
+      <div ref={wrap} className="absolute inset-0 no-touch-scroll" style={{ cursor: panning ? 'grab' : tool === 'measure' ? 'crosshair' : cursor }}>
         <Stage
           ref={stageRef}
           width={size.w}
@@ -125,15 +149,20 @@ export function PlanCanvas({ bounds, grid, children, apiRef, onBackground, onWor
           scaleX={view.scale}
           scaleY={view.scale}
           onDragEnd={(e) => {
+            if (e.target === stageRef.current) userMoved()
             if (e.target === stageRef.current) setView((v) => ({ ...v, ox: e.target.x(), oy: e.target.y() }))
+          }}
+          onTouchMove={(e) => touchMove(e.evt)}
+          onTouchEnd={(e) => {
+            if (e.evt.touches.length < 2) pinch.current = null
           }}
           onWheel={(e) => {
             e.evt.preventDefault()
             const p = stageRef.current?.getPointerPosition()
             zoomAt(e.evt.deltaY < 0 ? 1.12 : 1 / 1.12, p?.x, p?.y)
           }}
-          onMouseDown={(e) => {
-            if (panning) return
+          onPointerDown={(e) => {
+            if (panning || pinch.current) return
             const w = toWorld()
             if (tool === 'measure') {
               setMeasure({ a: w, b: w })
@@ -142,12 +171,12 @@ export function PlanCanvas({ bounds, grid, children, apiRef, onBackground, onWor
             if (e.target === stageRef.current || e.target.name() === 'bg') onBackground?.()
             onWorldDown?.(w, e)
           }}
-          onMouseMove={() => {
+          onPointerMove={() => {
             const w = toWorld()
             if (tool === 'measure' && measure) setMeasure({ ...measure, b: w })
             onWorldMove?.(w)
           }}
-          onMouseUp={() => {
+          onPointerUp={() => {
             const w = toWorld()
             onWorldUp?.(w)
           }}
@@ -198,7 +227,7 @@ function ZoomBar({ scale, onIn, onOut, onFit, onClearMeasure }: { scale: number;
     return () => window.removeEventListener('keydown', k)
   }, [onFit, onIn, onOut, onClearMeasure])
   return (
-    <div className="absolute bottom-4 right-4 glass rounded-lg flex items-center gap-1 p-1 text-xs">
+    <div className="absolute bottom-4 right-4 glass zoom-bar rounded-lg flex items-center gap-1 p-1 text-xs">
       {onClearMeasure && (
         <button className="btn h-7" onClick={onClearMeasure}>
           Clear measure

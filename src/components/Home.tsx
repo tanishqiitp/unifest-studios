@@ -112,7 +112,7 @@ export function Home() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <header className="h-14 flex items-center justify-between px-6 border-b border-line sticky top-0 bg-ink/90 backdrop-blur z-10">
+      <header className="h-14 flex items-center justify-between px-3 sm:px-6 border-b border-line sticky top-0 bg-ink/90 backdrop-blur z-10">
         <div className="flex items-center gap-2 select-none">
           <div className="h-7 w-7 rounded-lg bg-white text-black flex items-center justify-center font-display font-bold text-sm">U</div>
           <div className="leading-none">
@@ -123,13 +123,13 @@ export function Home() {
         <div className="flex items-center gap-2">
           <AccountButton />
           <button className="btn" onClick={() => setUI({ venuesOpen: true })}>
-            <Building2 size={13} /> Venues
+            <Building2 size={13} /> <span className="hidden sm:inline">Venues</span>
           </button>
           <button className="btn" onClick={() => file.current?.click()}>
-            <FolderOpen size={13} /> Open file
+            <FolderOpen size={13} /> <span className="hidden sm:inline">Open file</span>
           </button>
           <button className="btn btn-primary" onClick={() => setUI({ wizardOpen: true })}>
-            <Plus size={13} /> New event
+            <Plus size={13} /> <span className="hidden sm:inline">New event</span><span className="sm:hidden">New</span>
           </button>
         </div>
         <input
@@ -148,11 +148,11 @@ export function Home() {
         />
       </header>
 
-      <div className="max-w-6xl mx-auto px-8">
-        <section className="pt-16 pb-12 grid grid-cols-5 gap-10 items-center fade-in">
-          <div className="col-span-3">
+      <div className="max-w-6xl mx-auto px-4 sm:px-8">
+        <section className="pt-8 sm:pt-16 pb-12 grid grid-cols-1 lg:grid-cols-5 gap-10 items-center fade-in">
+          <div className="lg:col-span-3">
             <div className="label">Production design studio</div>
-            <h1 className="font-display text-5xl font-semibold tracking-tight leading-[1.05] mt-3">
+            <h1 className="font-display text-4xl sm:text-5xl font-semibold tracking-tight leading-[1.05] mt-3">
               Design the show
               <br />
               <span className="text-dim">before you build it.</span>
@@ -160,7 +160,7 @@ export function Home() {
             <p className="text-sm text-dim mt-5 max-w-lg leading-relaxed">
               Plan the ground, stage, truss and LED screens in one place. See it live in 3D, check every load and circuit, then send a link to your client and a full technical pack to your crew.
             </p>
-            <div className="flex gap-2 mt-7">
+            <div className="flex flex-wrap gap-2 mt-7">
               <button className="btn btn-primary h-11 px-5 text-sm" onClick={() => setUI({ wizardOpen: true })}>
                 Start a new event <ArrowRight size={14} />
               </button>
@@ -179,7 +179,7 @@ export function Home() {
           </div>
         </section>
 
-        <section className="grid grid-cols-7 gap-2 pb-12">
+        <section className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 pb-12">
           {(
             [
               [<Layers size={15} key="i" />, 'Ground plan', 'Zones, capacity, sightlines'],
@@ -217,7 +217,7 @@ export function Home() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {projects.map(({ e, p }) => (
                 <div key={e.id} className="group rounded-xl border border-line hover:border-line-hi transition-colors overflow-hidden">
                   <button className="block w-full aspect-[16/10] bg-black p-2" onClick={() => open(p)} aria-label={`Open ${e.name}`}>
@@ -274,7 +274,7 @@ export function Home() {
         <section className="pb-20">
           <h2 className="font-display text-xl font-semibold">Start from a template</h2>
           <p className="text-xs text-mute mt-0.5 mb-4">Complete, safe starting layouts. Every part is editable.</p>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {templates.map(({ t, p }) => (
               <button key={t.name} className="text-left rounded-xl border border-line hover:border-white transition-colors overflow-hidden" onClick={() => open({ ...p, id: undefined })}>
                 <div className="aspect-[4/3] bg-black p-2">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, Sky, Stars } from '@react-three/drei'
+import { useDevice } from '../lib/device'
 import { Bloom, EffectComposer, ToneMapping, Vignette } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import * as THREE from 'three'
@@ -55,6 +56,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [crowd, setCrowd] = useState(true)
   const [labels, setLabels] = useState(false)
   const [showcase, setShowcase] = useState(!!compact)
+  // Phones get lighter rendering so the 3D view stays smooth and the battery lasts.
+  const lowPower = useDevice((d) => d.kind === 'phone') || !!compact
   const [video, setVideo] = useState<string | null>(null)
   const [shotReq, setShotReq] = useState(0)
   const [rec, setRec] = useState<RecordReq | null>(null)
@@ -104,8 +107,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   return (
     <div className="relative h-full w-full overflow-hidden" style={{ background: bg }}>
       <Canvas
-        shadows
-        dpr={[1, compact ? 1.5 : 2]}
+        shadows={!lowPower}
+        dpr={[1, lowPower ? 1.5 : 2]}
         gl={{ preserveDrawingBuffer: true, antialias: true, powerPreference: 'high-performance' }}
         camera={{ fov: 50, near: 0.1, far: 3000, position: [0, 20, 60] }}
         onPointerMissed={() => setInfo(null)}
@@ -295,7 +298,7 @@ const VIEWS = [
 ] as const
 
 function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd['kind'], v?: number | string) => void; compact: boolean }) {
-  const [open, setOpen] = useState(!compact)
+  const [open, setOpen] = useState(!compact && useDevice.getState().kind !== 'phone')
   const deg = THREE.MathUtils.degToRad
   const btn = 'btn btn-icon h-8 w-8'
   const pos = compact ? 'top-28' : 'top-1/2 -translate-y-1/2'
@@ -598,7 +601,7 @@ function Scene(props: SceneProps) {
       {labels && <Labels project={project} look={look} />}
 
       {show && (
-        <EffectComposer multisampling={compact ? 0 : 4}>
+        <EffectComposer multisampling={useDevice.getState().kind === 'phone' || compact ? 0 : 4}>
           <Bloom mipmapBlur luminanceThreshold={0.85} luminanceSmoothing={0.2} intensity={1.1} radius={0.75} />
           <Vignette offset={0.25} darkness={0.75} />
           <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />

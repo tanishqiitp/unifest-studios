@@ -65,7 +65,7 @@ export function Guide() {
   }
   const pos = ws === 'viz' ? 'left-4 top-4' : 'left-[272px] bottom-4'
   return (
-    <div className={`absolute ${pos} z-20 w-72 glass rounded-xl p-4 fade-in shadow-2xl`} role="note">
+    <div className={`absolute ${pos} z-20 w-72 glass guide-card rounded-xl p-4 fade-in shadow-2xl`} role="note">
       <div className="flex items-start gap-2">
         <Lightbulb size={14} className="mt-0.5 shrink-0" />
         <div className="flex-1 text-sm font-semibold">{g.title}</div>

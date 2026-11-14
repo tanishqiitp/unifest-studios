@@ -27,6 +27,8 @@ interface UI {
   // Values the new-event wizard starts with, e.g. a room picked from the venue library.
   wizardPrefill: { name?: string; venueW?: number; venueL?: number; audience?: number; outdoor?: boolean } | null
   warningsOpen: boolean
+  // Phones and tablets: which side panel is open as a drawer.
+  panel: 'left' | 'right' | null
   toast: string | null
 }
 
@@ -82,6 +84,7 @@ export const useStore = create<State>()(
         venuesOpen: false,
         wizardPrefill: null,
         warningsOpen: false,
+        panel: null,
         toast: null,
       },
       mutate: (fn) => {

@@ -169,7 +169,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   }, [onClose])
   // Rendered on <body> so a blurred or transformed parent can't trap the overlay.
   return createPortal(
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onMouseDown={onClose}>
       <div className={`card fade-in w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[90vh] overflow-auto`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-line">
           <div className="font-display font-semibold">{title}</div>

@@ -150,3 +150,83 @@ select.field {
     transform: none;
   }
 }
+
+/* ---------- Phones and tablets (html[data-device] is set by lib/device.ts) ---------- */
+html[data-touch="1"] button,
+html[data-touch="1"] a {
+  touch-action: manipulation;
+}
+.no-touch-scroll {
+  touch-action: none;
+}
+html[data-device="phone"] aside,
+html[data-device="tablet"] aside {
+  position: fixed;
+  z-index: 35;
+  display: none;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+}
+html[data-device="tablet"] aside {
+  top: var(--top-h, 56px);
+  bottom: 40px;
+  width: 340px !important;
+}
+html[data-device="tablet"] aside.border-r {
+  left: 0;
+}
+html[data-device="tablet"] aside.border-l {
+  right: 0;
+}
+html[data-device="phone"] aside {
+  left: 0;
+  right: 0;
+  bottom: 40px;
+  width: auto !important;
+  height: 62vh;
+  border: 1px solid var(--color-line) !important;
+  border-bottom: 0 !important;
+  border-radius: 16px 16px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+html[data-panel="left"] aside.border-r,
+html[data-panel="right"] aside.border-l {
+  display: block;
+  animation: fadeIn 0.15s ease-out;
+}
+html[data-device="phone"] .btn,
+html[data-device="tablet"] .btn {
+  min-height: 36px;
+}
+html[data-device="phone"] .btn-icon,
+html[data-device="tablet"] .btn-icon {
+  min-width: 36px;
+}
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+html[data-device="phone"] .zoom-bar {
+  bottom: 64px;
+  right: 12px;
+}
+html[data-device="phone"] .guide-card {
+  left: 12px !important;
+  right: 12px !important;
+  top: auto !important;
+  bottom: 64px !important;
+  width: auto !important;
+  transform: none !important;
+}
+/* Canvas hint lines sit where the panel buttons go on small screens. */
+html[data-device="phone"] .absolute.left-4.bottom-4.text-mute,
+html[data-device="tablet"] .absolute.left-4.bottom-4.text-mute {
+  display: none;
+}
+html[data-device="phone"] .logo-text {
+  display: none;
+}
+html[data-device="phone"] .guide-card {
+  bottom: 120px !important;
+}

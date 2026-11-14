@@ -114,7 +114,7 @@ function GroundNode({ g, editable }: { g: GroundItem; editable: boolean }) {
         strokeScaleEnabled={false}
         listening={editable}
         draggable={editable && tool === 'select'}
-        onMouseDown={(e) => {
+        onPointerDown={(e) => {
           e.cancelBubble = true
           select({ kind: 'ground', id: g.id })
         }}
@@ -184,7 +184,7 @@ function DeckNode({ id, editable, dim }: { id: string; editable: boolean; dim: b
         strokeScaleEnabled={false}
         listening={editable}
         draggable={editable && tool === 'select'}
-        onMouseDown={(e) => {
+        onPointerDown={(e) => {
           e.cancelBubble = true
           select({ kind: 'deck', id })
         }}
@@ -222,6 +222,10 @@ function ScreensTop({ project }: { project: Project }) {
         return (
           <Group
             key={s.id}
+            onDblTap={() => {
+              select({ kind: 'screen', id: s.mirrorOf ?? s.id })
+              setUI({ workspace: 'led' })
+            }}
             onDblClick={() => {
               select({ kind: 'screen', id: s.mirrorOf ?? s.id })
               setUI({ workspace: 'led' })
@@ -302,7 +306,7 @@ function TrussNode({ id, editable, dim }: { id: string; editable: boolean; dim: 
           fill="#000000aa"
           hitStrokeWidth={12}
           listening={editable}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
             if (tool !== 'select') return
             e.cancelBubble = true
             select({ kind: 'truss', id })
@@ -328,7 +332,7 @@ function TrussNode({ id, editable, dim }: { id: string; editable: boolean; dim: 
               strokeWidth={1.5}
               strokeScaleEnabled={false}
               draggable
-              onMouseDown={(e) => (e.cancelBubble = true)}
+              onPointerDown={(e) => (e.cancelBubble = true)}
               onDragEnd={(e) => moveEnd(end as 1 | 2, e.target.x(), e.target.y())}
             />
           ))}
@@ -357,7 +361,7 @@ function RigOverlay({ project }: { project: Project }) {
             x={s.x}
             y={s.y}
             draggable={!!hoist}
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
               if (!hoist) return
               e.cancelBubble = true
               select({ kind: 'hoist', id: s.id })
@@ -418,7 +422,7 @@ function TableNode({ t, editable, dim }: { t: Table; editable: boolean; dim: boo
         opacity={dim ? 0.55 : 1}
         listening={editable}
         draggable={editable && tool === 'select'}
-        onMouseDown={(e) => {
+        onPointerDown={(e) => {
           e.cancelBubble = true
           select({ kind: 'table', id: t.id })
         }}

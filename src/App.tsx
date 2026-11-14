@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Armchair, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { AlertTriangle, Armchair, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -20,6 +20,7 @@ import { Home } from './components/Home'
 import { VenueFinder } from './components/VenueFinder'
 import { Guide } from './components/Guide'
 import { nanoid } from 'nanoid'
+import { useDevice, isCompact, type DevicePref } from './lib/device'
 
 // The 3D engine is large, so it loads only when someone opens a 3D view.
 const Viz3DWorkspace = lazy(() => import('./workspaces/Viz3D').then((m) => ({ default: m.Viz3DWorkspace })))
@@ -89,7 +90,7 @@ function Logo() {
   return (
     <div className="flex items-center gap-2 select-none">
       <div className="h-7 w-7 rounded-lg bg-white text-black flex items-center justify-center font-display font-bold text-sm">U</div>
-      <div className="leading-none">
+      <div className="leading-none logo-text">
         <div className="font-display font-semibold text-[13px] tracking-tight">UNIFEST</div>
         <div className="text-[8px] tracking-[0.3em] text-mute">STUDIOS</div>
       </div>
@@ -99,15 +100,21 @@ function Logo() {
 
 function Studio() {
   const ui = useStore((s) => s.ui)
-  const [narrow, setNarrow] = useState(() => window.innerWidth < 1024)
-  useEffect(() => {
-    const r = () => setNarrow(window.innerWidth < 1024)
-    window.addEventListener('resize', r)
-    return () => window.removeEventListener('resize', r)
-  }, [])
+  const device = useDevice((s) => s.kind)
+  const compact = isCompact(device)
   useShortcuts()
+  // Phones and tablets show the side panels as drawers; CSS reads html[data-panel].
+  useEffect(() => {
+    document.documentElement.dataset.panel = compact && ui.panel ? ui.panel : ''
+  }, [compact, ui.panel])
+  // Picking something on a small screen opens its properties; switching workspace closes drawers.
+  useEffect(() => {
+    if (compact && ui.selection) useStore.getState().setUI({ panel: 'right' })
+  }, [compact, ui.selection])
+  useEffect(() => {
+    useStore.getState().setUI({ panel: null })
+  }, [ui.workspace])
 
-  if (narrow) return <DesktopGate />
   if (ui.home)
     return (
       <>
@@ -134,6 +141,7 @@ function Studio() {
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
         {['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <Hud />}
         {['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <ToolRail />}
+        {compact && ['ground', 'stage', 'truss', 'led', 'seating'].includes(ui.workspace) && <PanelToggles />}
         <Guide />
       </div>
       <WarningsBar />
@@ -177,23 +185,36 @@ function Venues() {
   )
 }
 
-function DesktopGate() {
+function PanelToggles() {
+  const panel = useStore((s) => s.ui.panel)
+  const ws = useStore((s) => s.ui.workspace)
+  const { setUI } = useStore.getState()
+  const phone = useDevice((d) => d.kind === 'phone')
+  if (phone && panel)
+    return (
+      <button className="btn fixed left-1/2 -translate-x-1/2 z-40 shadow-2xl" style={{ bottom: 'calc(62vh + 48px)' }} onClick={() => setUI({ panel: null })}>
+        <ChevronDown size={14} /> Close panel
+      </button>
+    )
+  const left = ws === 'ground' ? 'Add items' : ws === 'led' ? 'Screens' : ws === 'seating' ? 'Tables' : 'Add'
   return (
-    <div className="h-full flex items-center justify-center p-6">
-      <div className="max-w-sm text-center fade-in">
-        <div className="flex justify-center mb-6">
-          <Logo />
-        </div>
-        <h1 className="font-display text-2xl font-semibold tracking-tight">Design on desktop.</h1>
-        <p className="text-sm text-dim mt-2 leading-relaxed">Unifest Studios is a precision design tool. Open it on a laptop or desktop (1024 px or wider) to design stages, truss, LED screens and ground plans.</p>
-        <button className="btn btn-primary mt-6" onClick={() => navigator.clipboard?.writeText(location.href)}>
-          Copy link for desktop
-        </button>
-        <p className="text-[11px] text-mute mt-4">Client 3D links open fine on phones.</p>
-      </div>
+    <div className="absolute left-3 bottom-3 z-20 glass rounded-xl flex gap-1 p-1">
+      <button className={`btn ${panel === 'left' ? 'btn-on' : ''}`} onClick={() => setUI({ panel: panel === 'left' ? null : 'left' })}>
+        <PanelLeft size={14} /> {left}
+      </button>
+      <button className={`btn ${panel === 'right' ? 'btn-on' : ''}`} onClick={() => setUI({ panel: panel === 'right' ? null : 'right' })}>
+        <PanelRight size={14} /> Properties
+      </button>
     </div>
   )
 }
+
+const LAYOUTS: { value: DevicePref; label: string }[] = [
+  { value: 'auto', label: 'Auto (fit this device)' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'tablet', label: 'Tablet / iPad' },
+  { value: 'desktop', label: 'Desktop' },
+]
 
 function TopBar() {
   const ui = useStore((s) => s.ui)
@@ -201,43 +222,52 @@ function TopBar() {
   const { setUI, mutate, notify, setProject } = useStore.getState()
   const file = useRef<HTMLInputElement>(null)
   const [menu, setMenu] = useState(false)
+  const device = useDevice((s) => s.kind)
+  const pref = useDevice((s) => s.pref)
+  const phone = device === 'phone'
+  const desktop = device === 'desktop'
+  const modeSeg = (
+    <Seg
+      value={ui.mode}
+      onChange={(mode) => setUI({ mode, overlay: mode === 'simple' ? 'none' : ui.overlay })}
+      options={[
+        { value: 'simple', label: 'Simple' },
+        { value: 'pro', label: 'Pro' },
+      ]}
+    />
+  )
+  const tabs = (
+    <nav className={`flex items-center gap-0.5 rounded-xl border border-line p-1 ${phone ? 'w-max' : 'mx-auto'}`}>
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => setUI({ workspace: t.id, tool: 'select' })}
+          title={`${t.tip} (${TABS.indexOf(t) + 1})`}
+          className={`h-8 px-2.5 xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
+        >
+          <t.icon size={13} className={ui.workspace === t.id ? '' : 'text-mute'} />
+          <span className={desktop ? 'hidden xl:inline' : 'hidden'}>{t.label}</span>
+          <span className={desktop ? 'xl:hidden' : ''}>{t.short}</span>
+        </button>
+      ))}
+    </nav>
+  )
   return (
-    <header className="h-14 shrink-0 flex items-center gap-3 px-4 border-b border-line bg-ink">
+    <header className="shrink-0 border-b border-line bg-ink" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+    <div className={`h-14 flex items-center ${phone ? 'gap-1.5 px-2' : 'gap-3 px-4'}`}>
       <button title="All projects" onClick={() => (saveNow(), setUI({ home: true, wizardOpen: false }))}>
         <Logo />
       </button>
-      <div className="w-px h-6 bg-line" />
+      {!phone && <div className="w-px h-6 bg-line" />}
       <input
-        className="bg-transparent text-sm font-medium w-32 xl:w-44 rounded-md px-2 h-8 border border-transparent hover:border-line focus:border-white outline-none"
+        className={`bg-transparent text-sm font-medium ${phone ? 'flex-1 min-w-0' : 'w-32 xl:w-44'} rounded-md px-2 h-8 border border-transparent hover:border-line focus:border-white outline-none`}
         value={project.name}
         onChange={(e) => mutate((p) => void (p.name = e.target.value))}
         aria-label="Project name"
       />
-      <nav className="flex items-center gap-0.5 rounded-xl border border-line p-1 mx-auto">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setUI({ workspace: t.id, tool: 'select' })}
-            title={`${t.tip} (${TABS.indexOf(t) + 1})`}
-            className={`h-8 px-2.5 xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
-          >
-            <t.icon size={13} className={ui.workspace === t.id ? '' : 'text-mute'} />
-            <span className="hidden xl:inline">{t.label}</span>
-            <span className="xl:hidden">{t.short}</span>
-          </button>
-        ))}
-      </nav>
-      <div className="flex items-center gap-1.5">
-        <div className="w-36">
-          <Seg
-            value={ui.mode}
-            onChange={(mode) => setUI({ mode, overlay: mode === 'simple' ? 'none' : ui.overlay })}
-            options={[
-              { value: 'simple', label: 'Simple' },
-              { value: 'pro', label: 'Pro' },
-            ]}
-          />
-        </div>
+      {!phone && tabs}
+      <div className={`flex items-center gap-1.5 ${phone ? 'ml-auto' : ''}`}>
+        {!phone && <div className="w-36">{modeSeg}</div>}
         <button className="btn btn-icon" title="Undo (Ctrl+Z)" onClick={undo}>
           <Undo2 size={14} />
         </button>
@@ -246,7 +276,7 @@ function TopBar() {
         </button>
         <div className="relative">
           <button className="btn" onClick={() => setMenu(!menu)}>
-            File <ChevronDown size={12} />
+            {phone ? <MoreHorizontal size={14} /> : <>File <ChevronDown size={12} /></>}
           </button>
           {menu && (
             <div className="absolute right-0 top-10 z-40 w-56 card p-1 fade-in" onMouseLeave={() => setMenu(false)}>
@@ -265,6 +295,21 @@ function TopBar() {
               <MenuItem icon={<FolderOpen size={13} />} label="Open .unifest file…" onClick={() => (file.current?.click(), setMenu(false))} />
               <MenuItem icon={<Save size={13} />} label="Save to this browser" hint="Ctrl+S" onClick={() => (saveNow() ? notify('Saved') : notify('Could not save: storage blocked'), setMenu(false))} />
               <div className="h-px bg-line my-1" />
+              {phone && (
+                <>
+                  <div className="px-1 py-1">{modeSeg}</div>
+                  <MenuItem icon={<HelpCircle size={13} />} label="Guide for this workspace" onClick={() => (setUI({ guideOpen: true }), setMenu(false))} />
+                </>
+              )}
+              <Sel
+                label="Layout"
+                value={pref}
+                onChange={(v) => {
+                  useDevice.getState().setPref(v as DevicePref)
+                  notify(v === 'auto' ? 'Layout follows this device' : `${LAYOUTS.find((l) => l.value === v)?.label} layout`)
+                }}
+                options={LAYOUTS}
+              />
               <Sel
                 label="Units"
                 value={project.units}
@@ -292,16 +337,22 @@ function TopBar() {
           }}
         />
         <AccountButton />
-        <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
-          <HelpCircle size={14} />
-        </button>
-        <button className="btn btn-icon" title="Keyboard shortcuts (?)" onClick={() => setUI({ shortcutsOpen: true })}>
-          <Keyboard size={14} />
-        </button>
-        <button className="btn btn-primary" onClick={() => setUI({ workspace: 'deliver' })}>
-          Deliver
-        </button>
+        {!phone && (
+          <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
+            <HelpCircle size={14} />
+          </button>
+        )}
+        {desktop && (
+          <button className="btn btn-icon" title="Keyboard shortcuts (?)" onClick={() => setUI({ shortcutsOpen: true })}>
+            <Keyboard size={14} />
+          </button>
+        )}
+        {device !== 'tablet' && <button className={`btn btn-primary ${phone ? 'btn-icon' : ''}`} title="Deliver" onClick={() => setUI({ workspace: 'deliver' })}>
+          {phone ? <Send size={14} /> : 'Deliver'}
+        </button>}
       </div>
+    </div>
+    {phone && <div className="px-2 pb-2 overflow-x-auto hide-scrollbar">{tabs}</div>}
     </header>
   )
 }
@@ -330,11 +381,14 @@ function Hud() {
     ...(project.tables.length ? ([['Seats', seatCount(project).toLocaleString('en-IN')]] as [string, string][]) : []),
   ]
   const ws = useStore((s) => s.ui.workspace)
-  const left = ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' ? 'left-[272px]' : 'left-4'
+  const device = useDevice((s) => s.kind)
+  const left = device !== 'desktop' ? 'left-3' : ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' ? 'left-[272px]' : 'left-4'
+  // Phones show the three most useful numbers only.
+  const shown = device === 'phone' ? items.filter(([k]) => k === 'Total pixels' || k === 'Weight' || k === 'Power') : items
   return (
     <div className={`absolute top-4 ${left} z-10 glass rounded-xl flex divide-x divide-line pointer-events-none`}>
-      {items.map(([k, v, wide]) => (
-        <div key={k} className={`px-3 py-1.5 ${wide ? 'hidden 2xl:block' : ''}`}>
+      {shown.map(([k, v, wide]) => (
+        <div key={k} className={`${device === 'phone' ? 'px-2 py-1' : 'px-3 py-1.5'} ${wide && device === 'desktop' ? 'hidden 2xl:block' : ''}`}>
           <div className="text-[9px] tracking-widest uppercase text-mute font-semibold">{k}</div>
           <div className="mono text-[13px] font-medium whitespace-nowrap">{v}</div>
         </div>
@@ -346,13 +400,14 @@ function Hud() {
 function ToolRail() {
   const ui = useStore((s) => s.ui)
   const { setUI } = useStore.getState()
+  const device = useDevice((s) => s.kind)
   const tools: { id: typeof ui.tool; icon: React.ReactNode; tip: string }[] = [
     { id: 'select', icon: <MousePointer2 size={15} />, tip: 'Select (V)' },
     { id: 'pan', icon: <Hand size={15} />, tip: 'Pan (H, or hold Space)' },
     { id: 'measure', icon: <Ruler size={15} />, tip: 'Measure (D)' },
   ]
   return (
-    <div className="absolute right-[336px] top-1/2 -translate-y-1/2 z-10 glass rounded-xl flex flex-col gap-1 p-1">
+    <div className={`absolute ${device === 'desktop' ? 'right-[336px]' : 'right-3'} top-1/2 -translate-y-1/2 z-10 glass rounded-xl flex flex-col gap-1 p-1`}>
       {tools.map((t) => (
         <button key={t.id} className={`btn btn-icon ${ui.tool === t.id ? 'btn-on' : ''}`} title={t.tip} onClick={() => setUI({ tool: t.id })}>
           {t.icon}
@@ -405,7 +460,7 @@ function WarningsBar() {
           {w.length ? <AlertTriangle size={13} className={errors ? 'text-err' : 'text-warn'} /> : <span className="h-2 w-2 rounded-full bg-white" />}
           {w.length ? `${errors} errors · ${w.length - errors} warnings` : 'All checks passed'}
         </button>
-        <span className="text-mute">{saveLabel} · {project.eventType} · {project.audience.toLocaleString('en-IN')} guests</span>
+        <span className="text-mute truncate ml-3">{saveLabel}<span className="hidden md:inline"> · {project.eventType}</span><span className="hidden md:inline"> · {project.audience.toLocaleString('en-IN')} guests</span></span>
       </footer>
     </>
   )
@@ -423,8 +478,8 @@ function Wizard() {
   }
   return (
     <Modal title="New event" onClose={() => setUI({ wizardOpen: false, wizardPrefill: null })} wide>
-      <div className="grid grid-cols-5 gap-8">
-        <div className="col-span-2 space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
+        <div className="md:col-span-2 space-y-3">
           <div className="label">Tell us about your event</div>
           <Txt label="Event name" value={inp.name} onChange={(name) => setInp({ ...inp, name })} />
           <Sel label="Event type" value={inp.eventType} onChange={(eventType) => setInp({ ...inp, eventType: eventType as EventType })} options={EVENT_TYPES.map((e) => ({ value: e, label: e }))} />
@@ -448,7 +503,7 @@ function Wizard() {
             Start blank
           </button>
         </div>
-        <div className="col-span-3">
+        <div className="md:col-span-3">
           <div className="label mb-3">Or start from a template</div>
           <div className="grid grid-cols-2 gap-2">
             {TEMPLATES.map((t) => (

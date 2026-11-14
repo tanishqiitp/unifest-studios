@@ -2,8 +2,8 @@
 project_id = "unifest-studios"
 
 [auth]
-site_url = "https://unifest-studios.vercel.app"
-additional_redirect_urls = ["https://unifest-studios.vercel.app/**", "http://localhost:5173/**"]
+site_url = "https://studios.unifestentertainment.com"
+additional_redirect_urls = ["https://studios.unifestentertainment.com/**", "https://unifest-studios.vercel.app/**", "http://localhost:5173/**"]
 enable_signup = true
 
 [auth.email]
