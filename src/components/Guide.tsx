@@ -63,7 +63,7 @@ export function Guide() {
       /* fine: the guide just shows again next time */
     }
   }
-  const pos = ws === 'viz' ? 'left-4 top-4' : 'left-[272px] bottom-4'
+  const pos = ws === 'viz' ? 'left-4 top-20' : 'left-[272px] bottom-16'
   return (
     <div className={`absolute ${pos} z-20 w-72 glass guide-card rounded-xl p-4 fade-in shadow-2xl`} role="note">
       <div className="flex items-start gap-2">

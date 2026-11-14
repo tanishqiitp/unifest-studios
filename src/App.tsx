@@ -247,17 +247,17 @@ function TopBar() {
     />
   )
   const tabs = (
-    <nav className={`flex items-center gap-0.5 rounded-xl border border-line p-1 ${phone ? 'w-max' : 'mx-auto'}`}>
+    <nav className={`flex items-center gap-0.5 rounded-xl border border-line p-1 ${!desktop ? 'w-max mx-auto' : 'mx-auto min-w-0 max-w-full overflow-x-auto no-scrollbar'}`}>
       {TABS.map((t) => (
         <button
           key={t.id}
           onClick={() => setUI({ workspace: t.id, tool: 'select' })}
           title={`${t.tip} (${TABS.indexOf(t) + 1})`}
-          className={`h-8 px-2.5 xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
+          className={`h-8 px-2 2xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
         >
           <t.icon size={13} className={ui.workspace === t.id ? '' : 'text-mute'} />
-          <span className={desktop ? 'hidden xl:inline' : 'hidden'}>{t.label}</span>
-          <span className={desktop ? 'xl:hidden' : ''}>{t.short}</span>
+          <span className={desktop ? 'hidden min-[2100px]:inline' : 'hidden'}>{t.label}</span>
+          <span className={desktop ? 'min-[2100px]:hidden' : ''}>{t.short}</span>
         </button>
       ))}
     </nav>
@@ -270,13 +270,14 @@ function TopBar() {
       </button>
       {!phone && <div className="w-px h-6 bg-line" />}
       <input
-        className={`bg-transparent text-sm font-medium ${phone ? 'flex-1 min-w-0' : 'w-32 xl:w-44'} rounded-md px-2 h-8 border border-transparent hover:border-line focus:border-white outline-none`}
+        className={`bg-transparent text-sm font-medium ${phone ? 'flex-1 min-w-0' : 'w-32 shrink-0 2xl:w-44'} rounded-md px-2 h-8 border border-transparent hover:border-line focus:border-white outline-none`}
         value={project.name}
         onChange={(e) => mutate((p) => void (p.name = e.target.value))}
         aria-label="Project name"
       />
-      {!phone && tabs}
-      <div className={`flex items-center gap-1.5 ${phone ? 'ml-auto' : ''}`}>
+      {desktop && tabs}
+      {device === 'tablet' && <div className="flex-1" />}
+      <div className={`flex items-center gap-1.5 shrink-0 ${phone ? 'ml-auto' : ''}`}>
         {!phone && <div className="w-36">{modeSeg}</div>}
         <button className="btn btn-icon" title="Undo (Ctrl+Z)" onClick={undo}>
           <Undo2 size={14} />
@@ -362,7 +363,7 @@ function TopBar() {
         </button>}
       </div>
     </div>
-    {phone && <div className="px-2 pb-2 overflow-x-auto hide-scrollbar">{tabs}</div>}
+    {!desktop && <div className="px-2 pb-2 overflow-x-auto hide-scrollbar">{tabs}</div>}
     </header>
   )
 }
@@ -392,7 +393,7 @@ function Hud() {
   ]
   const ws = useStore((s) => s.ui.workspace)
   const device = useDevice((s) => s.kind)
-  const left = device !== 'desktop' ? 'left-3' : ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' ? 'left-[272px]' : 'left-4'
+  const left = device !== 'desktop' ? 'left-3' : ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' || ws === 'decor' ? 'left-[272px]' : 'left-4'
   // Phones show the three most useful numbers only.
   const shown = device === 'phone' ? items.filter(([k]) => k === 'Total pixels' || k === 'Weight' || k === 'Power') : items
   return (

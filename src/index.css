@@ -230,3 +230,6 @@ html[data-device="phone"] .logo-text {
 html[data-device="phone"] .guide-card {
   bottom: 120px !important;
 }
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
