@@ -1,3 +1,4 @@
+import { hasOpening, setLedArea } from './setpieces'
 import { jsPDF } from 'jspdf'
 import { autoTable } from 'jspdf-autotable'
 import type { Decor, DecorKind, Project, QuoteSettings } from '../types'
@@ -54,7 +55,33 @@ export function decorRows(p: Project): EquipRow[] {
   return rows
 }
 
-export const fullEquipment = (p: Project): EquipRow[] => [...equipmentList(p), ...decorRows(p)]
+// Scenic set: LED surfaces by area, fabricated pieces by front area, props by piece.
+export function setRows(p: Project): EquipRow[] {
+  const rows: EquipRow[] = []
+  const add = (category: string, item: string, qty: number, unit: string, weightKg: number, powerW: number) => {
+    const r = rows.find((x) => x.item === item)
+    if (r) {
+      r.qty = Math.round((r.qty + qty) * 10) / 10
+      r.weightKg += weightKg
+      r.powerW += powerW
+    } else rows.push({ category, item, qty: Math.round(qty * 10) / 10, unit, weightKg, powerW })
+  }
+  for (const s of p.set ?? []) {
+    const led = setLedArea(s)
+    if (led > 0) add('Set', 'Set LED (per m²)', led, 'm²', led * 30, led * 250)
+    const front = Math.max(0, s.w * s.h - (s.skin === 'led' ? led : 0))
+    if (s.kind === 'scaffold') add('Set', 'Scaffold tower', 1, 'pcs', s.w * s.d * s.h * 25, 0)
+    else if (s.kind === 'tent') add('Set', 'Tent / canopy', 1, 'pcs', 80, 0)
+    else if (s.kind === 'stall') add('Set', 'Food stall', 1, 'pcs', 150, 500)
+    else if (s.kind === 'balloon') add('Set', 'Branded balloon', 1, 'pcs', 40, 0)
+    else if (s.kind === 'cutout') add('Set', 'Printed cut-out (per m²)', s.w * s.h, 'm²', s.w * s.h * 6, 0)
+    else if (s.skin !== 'led' || hasOpening(s.kind)) add('Set', `Fabricated set, ${s.skin} finish (per m²)`, front, 'm²', front * 18, 0)
+    if (s.outline) add('Set', s.outline.style === 'bulb' ? 'Bulb outline (per m)' : 'Neon outline (per m)', 2 * (s.w + s.h), 'm', 0, 2 * (s.w + s.h) * (s.outline.style === 'bulb' ? 40 : 15))
+  }
+  return rows
+}
+
+export const fullEquipment = (p: Project): EquipRow[] => [...equipmentList(p), ...decorRows(p), ...setRows(p)]
 
 // Lower-case keyword -> INR per unit per day, checked in order.
 export const DEFAULT_RATES: Record<string, number> = {
@@ -79,7 +106,21 @@ export const DEFAULT_RATES: Record<string, number> = {
 }
 
 // Best-guess INR per unit per day for an equipment row. Unknown items are 0 (price them by hand).
+const SET_RATES: [RegExp, number][] = [
+  [/Set LED/, 350],
+  [/Scaffold tower/, 6000],
+  [/Tent/, 3500],
+  [/Food stall/, 4000],
+  [/balloon/i, 15000],
+  [/cut-out/, 450],
+  [/gold|mirror/, 1800],
+  [/Fabricated set/, 900],
+  [/Bulb outline/, 250],
+  [/Neon outline/, 400],
+]
+
 export function defaultRate(row: EquipRow): number {
+  if (row.category === 'Set') return SET_RATES.find(([re]) => re.test(row.item))?.[1] ?? 0
   const t = row.item.toLowerCase()
   if (/ port$/.test(t)) return 0
   for (const d of Object.values(DECOR_INFO)) if (d.category !== 'Model' && row.item.startsWith(d.name)) return d.rate

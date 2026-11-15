@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Armchair, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -15,6 +15,7 @@ import { TrussWorkspace } from './workspaces/Truss'
 import { DeliverWorkspace } from './workspaces/Deliver'
 import { SeatingWorkspace } from './workspaces/Seating'
 import { DecorWorkspace } from './workspaces/Decor'
+import { SetDesignWorkspace } from './workspaces/SetDesign'
 import { PlanWorkspace } from './workspaces/Plan'
 import { ClientFeedback } from './components/ClientFeedback'
 import { seatCount } from './lib/seating'
@@ -43,13 +44,14 @@ function Loading3D() {
 const TABS: { id: Workspace; label: string; short: string; kicker: string; icon: typeof MapIcon; tip: string }[] = [
   { id: 'ground', label: 'Ground Plan', short: 'Ground', kicker: '01', icon: MapIcon, tip: 'Venue size, crowd areas, exits and facilities' },
   { id: 'stage', label: 'Stage', short: 'Stage', kicker: '02', icon: Square, tip: 'Build the stage from decks, risers and runways' },
-  { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '03', icon: Spline, tip: 'Truss, hoists, lights and speakers, with live weights' },
-  { id: 'led', label: 'LED Screens', short: 'LED', kicker: '04', icon: MonitorPlay, tip: 'Screen sizes, pixels, cabling and power' },
-  { id: 'seating', label: 'Seating', short: 'Seats', kicker: '05', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
-  { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '06', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
-  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '07', icon: Box, tip: 'See everything in 3D, render images and videos' },
-  { id: 'plan', label: 'Plan', short: 'Plan', kicker: '08', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
-  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '09', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
+  { id: 'set', label: 'Set Design', short: 'Set', kicker: '03', icon: Castle, tip: 'Festival facades: towers, frames, arches, LED, bulb outlines, cut-outs, themes' },
+  { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '04', icon: Spline, tip: 'Truss, hoists, lights and speakers, with live weights' },
+  { id: 'led', label: 'LED Screens', short: 'LED', kicker: '05', icon: MonitorPlay, tip: 'Screen sizes, pixels, cabling and power' },
+  { id: 'seating', label: 'Seating', short: 'Seats', kicker: '06', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
+  { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '07', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
+  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '08', icon: Box, tip: 'See everything in 3D, render images and videos' },
+  { id: 'plan', label: 'Plan', short: 'Plan', kicker: '09', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
+  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '10', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
 ]
 
 export default function App() {
@@ -147,11 +149,12 @@ function Studio() {
           </Suspense>
         )}
         {ui.workspace === 'decor' && <DecorWorkspace />}
+        {ui.workspace === 'set' && <SetDesignWorkspace />}
         {ui.workspace === 'plan' && <PlanWorkspace />}
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
-        {['ground', 'stage', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <Hud />}
-        {['ground', 'stage', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <ToolRail />}
-        {compact && ['ground', 'stage', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <PanelToggles />}
+        {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <Hud />}
+        {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <ToolRail />}
+        {compact && ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <PanelToggles />}
         <Guide />
       </div>
       <WarningsBar />
@@ -393,7 +396,7 @@ function Hud() {
   ]
   const ws = useStore((s) => s.ui.workspace)
   const device = useDevice((s) => s.kind)
-  const left = device !== 'desktop' ? 'left-3' : ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' || ws === 'decor' ? 'left-[272px]' : 'left-4'
+  const left = device !== 'desktop' ? 'left-3' : ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' || ws === 'decor' || ws === 'set' ? 'left-[272px]' : 'left-4'
   // Phones show the three most useful numbers only.
   const shown = device === 'phone' ? items.filter(([k]) => k === 'Total pixels' || k === 'Weight' || k === 'Power') : items
   return (
@@ -639,7 +642,7 @@ function useShortcuts() {
       if (k === 'b' && ui.workspace === 'led') setUI({ tool: ui.tool === 'paint' ? 'select' : 'paint' })
       if (k === '?') setUI({ shortcutsOpen: true })
       if (k === 'escape') setUI({ tool: 'select' })
-      if (/^[1-9]$/.test(k)) setUI({ workspace: TABS[Number(k) - 1].id, tool: 'select' })
+      if (/^[1-9]$/.test(k) && TABS[Number(k) - 1]) setUI({ workspace: TABS[Number(k) - 1].id, tool: 'select' })
       if ((k === 'delete' || k === 'backspace') && ui.selection) {
         const { kind, id } = ui.selection
         mutate((p) => {

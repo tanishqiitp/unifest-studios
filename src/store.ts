@@ -7,8 +7,9 @@ import { loadCurrent, writeProject } from './lib/library'
 import { cloudEnabled, pushProject, useAuth } from './lib/cloud'
 import { nanoid } from 'nanoid'
 import { withSeating } from './lib/seating'
+import { syncSetMirrors } from './lib/setpieces'
 
-export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture' | 'table' | 'decor' | 'comment'; id: string } | null
+export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture' | 'table' | 'decor' | 'comment' | 'set'; id: string } | null
 export type LedOverlay = 'none' | 'data' | 'power'
 export type Tool = 'select' | 'pan' | 'paint' | 'measure' | 'draw-truss' | 'hoist'
 
@@ -91,6 +92,7 @@ export const useStore = create<State>()(
         const p = structuredClone(get().project)
         fn(p)
         syncMirrors(p)
+        syncSetMirrors(p)
         p.updatedAt = Date.now()
         set({ project: p })
       },
@@ -98,6 +100,7 @@ export const useStore = create<State>()(
         if (!p.id) p.id = nanoid(10)
         withSeating(p)
         syncMirrors(p)
+        syncSetMirrors(p)
         set({ project: p, ui: { ...get().ui, selection: null } })
       },
       setUI: (u) => set({ ui: { ...get().ui, ...u } }),

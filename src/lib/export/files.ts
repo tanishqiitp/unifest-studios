@@ -275,6 +275,8 @@ export function liteProject(p: Project, images = false): Project {
     screens: p.screens.map((s) => ({ ...s, id: ids.get(s.id)!, mirrorOf: s.mirrorOf ? ids.get(s.mirrorOf) : undefined, image: images ? s.image : undefined })),
     // Imported models live only in the designer's browser, so clients don't get them.
     decor: (p.decor ?? []).filter((d) => d.kind !== 'model').map((d, i) => ({ ...d, id: `x${i}`, image: images ? d.image : undefined })),
+    set: (p.set ?? []).map((s) => ({ ...s, image: images ? s.image : undefined })),
+    setContent: images || !p.setContent?.startsWith('data:') ? p.setContent : undefined,
     brand: p.brand ? { ...p.brand, logo: images ? p.brand.logo : undefined } : undefined,
     quote: undefined,
     crew: undefined,

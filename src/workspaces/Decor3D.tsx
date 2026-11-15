@@ -15,7 +15,7 @@ type Info = { title: string; lines: string[] }
 const rad = THREE.MathUtils.degToRad
 
 // Everything placed in the Decor workspace: decor, special effects, sponsor branding and imported models.
-export function DecorItems({ project, show, motion, onInfo }: { project: Project; show: boolean; motion: boolean; onInfo: (i: Info) => void }) {
+export function DecorItems({ project, show, motion, dropAt = 0, onInfo }: { project: Project; show: boolean; motion: boolean; dropAt?: number; onInfo: (i: Info) => void }) {
   return (
     <>
       {(project.decor ?? []).map((d) => (
@@ -28,16 +28,16 @@ export function DecorItems({ project, show, motion, onInfo }: { project: Project
             onInfo({ title: d.label || DECOR[d.kind].name, lines: [DECOR[d.kind].name, `${d.w} × ${d.d} m, ${d.h} m high`, ...(d.sponsor ? [`Sponsor: ${d.sponsor}`] : []), ...(DECOR[d.kind].effect ? [DECOR[d.kind].tip] : [])] })
           }}
         >
-          <DecorMesh d={d} brand={project.brand} show={show} motion={motion} />
+          <DecorMesh d={d} brand={project.brand} show={show} motion={motion} dropAt={dropAt} />
         </group>
       ))}
     </>
   )
 }
 
-function DecorMesh({ d, brand, show, motion }: { d: Decor; brand?: Brand; show: boolean; motion: boolean }) {
+function DecorMesh({ d, brand, show, motion, dropAt }: { d: Decor; brand?: Brand; show: boolean; motion: boolean; dropAt: number }) {
   const fx = DECOR[d.kind].effect
-  if (fx) return <Effect d={d} show={show} motion={motion} />
+  if (fx) return <Effect d={d} show={show} motion={motion} dropAt={dropAt} />
   switch (d.kind) {
     case 'mandap':
       return <Mandap d={d} />
@@ -372,7 +372,7 @@ function Artwork({ d, brand }: { d: Decor; brand?: Brand }) {
 // ---------------------------------------------------------------- special effects
 
 // Each effect is a small particle system that loops while the effect is set to fire.
-function Effect({ d, show, motion }: { d: Decor; show: boolean; motion: boolean }) {
+function Effect({ d, show, motion, dropAt }: { d: Decor; show: boolean; motion: boolean; dropAt: number }) {
   const kind = d.kind
   const N = kind === 'smoke' ? 40 : kind === 'firework' ? 260 : kind === 'confetti' ? 220 : kind === 'bubble' ? 60 : 180
   const pts = useRef<THREE.Points>(null)
@@ -407,10 +407,13 @@ function Effect({ d, show, motion }: { d: Decor; show: boolean; motion: boolean 
   const k = d.intensity ?? 0.8
   const base = useMemo(() => new THREE.Color(d.color), [d.color])
   const tmp = useMemo(() => new THREE.Color(), [])
-  const firing = (d.fire ?? true) && motion
+  const steady = (d.fire ?? true) && motion
   const cycle = kind === 'firework' ? 3 : kind === 'confetti' ? 4 : 1.4
 
   useFrame(({ clock }, dt) => {
+    // During a drop every effect fires for 4 seconds, even ones switched off.
+    const sinceDrop = (performance.now() - dropAt) / 1000
+    const firing = steady || (dropAt > 0 && sinceDrop >= 0 && sinceDrop < 4)
     const { pos, col, vel, age } = state
     const t = clock.elapsedTime
     const H = d.h * k

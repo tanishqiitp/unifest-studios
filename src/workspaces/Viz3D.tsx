@@ -8,13 +8,14 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import type { OrbitControls as OrbitImpl } from 'three-stdlib'
-import { Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Orbit, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { Zap, Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Orbit, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useStore } from '../store'
 import type { Fixture, GroundItem, Project, Screen, Table, Truss } from '../types'
 import { fmt, screenColumns, screenStats, stageBounds, TRUSS_INFO, trussLength } from '../lib/calc'
 import { GROUND_LABELS } from '../lib/export/labels'
 import { CHAIR, isSeated, seatPositions } from '../lib/seating'
 import { DecorItems } from './Decor3D'
+import { SetItems } from './Set3D'
 
 RectAreaLightUniformsLib.init()
 
@@ -65,6 +66,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [recProgress, setRecProgress] = useState(0)
   const [recMenu, setRecMenu] = useState(false)
   const [info, setInfo] = useState<Info | null>(null)
+  const [dropAt, setDropAt] = useState(0)
   const [viewCmd, setViewCmd] = useState<ViewCmd | null>(null)
   const [angles, setAngles] = useState<Angles>({ az: 0, el: 20 })
   const view = (kind: ViewCmd['kind'], value: number | string = 0) => {
@@ -138,6 +140,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
           onShowcaseStop={() => setShowcase(false)}
           viewCmd={viewCmd}
           onAngles={setAngles}
+          dropAt={dropAt}
         />
       </Canvas>
 
@@ -208,6 +211,9 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
                 e.target.value = ''
               }}
             />
+            <button className="btn h-8" title="Fire every effect at once: pyro, CO₂, flames, a strobe flash and the LED flash" onClick={() => (setDropAt(performance.now()), setShowcase(false))}>
+              <Zap size={14} /> Drop
+            </button>
             <button className={`btn h-8 ${video ? 'btn-on' : ''}`} title="Play your own video or image on every screen (stays on this computer)" onClick={() => (video ? setVideo(null) : fileRef.current?.click())}>
               <Film size={14} /> {video ? 'Stop content' : 'Play content'}
             </button>
@@ -379,6 +385,7 @@ function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd[
 // ---------------------------------------------------------------- scene
 
 interface SceneProps {
+  dropAt: number
   project: Project
   preset: Preset
   camReq: number
@@ -410,7 +417,7 @@ function focusOf(project: Project) {
 }
 
 function Scene(props: SceneProps) {
-  const { project, preset, camReq, look, palette, motion, crowd, labels, showcase, video, shotReq, rec, compact, onInfo } = props
+  const { project, preset, camReq, look, palette, motion, crowd, labels, showcase, video, shotReq, rec, compact, onInfo, dropAt } = props
   const controls = useRef<OrbitImpl>(null)
   const { camera, gl, scene, size, setSize, setDpr, viewport } = useThree()
   const f = useMemo(() => focusOf(project), [project])
@@ -599,7 +606,9 @@ function Scene(props: SceneProps) {
         <ScreenMesh key={s.id} s={s} project={project} content={content} look={look} onInfo={onInfo} />
       ))}
       <Fixtures project={project} look={look} palette={palette} motion={motion} />
-      <DecorItems project={project} show={show} motion={motion} onInfo={onInfo} />
+      <SetItems project={project} show={show} dropAt={dropAt} onInfo={onInfo} />
+      <DecorItems project={project} show={show} motion={motion} dropAt={dropAt} onInfo={onInfo} />
+      <DropFlash dropAt={dropAt} />
       {labels && <Labels project={project} look={look} />}
 
       {show && (
@@ -611,6 +620,17 @@ function Scene(props: SceneProps) {
       )}
     </>
   )
+}
+
+// The drop: a strobe burst of white light for a second.
+function DropFlash({ dropAt }: { dropAt: number }) {
+  const l = useRef<THREE.AmbientLight>(null)
+  useFrame(() => {
+    if (!l.current) return
+    const t = (performance.now() - dropAt) / 1000
+    l.current.intensity = dropAt && t >= 0 && t < 1 ? (Math.sin(t * 50) > 0 ? 6 * (1 - t) : 0) : 0
+  })
+  return <ambientLight ref={l} intensity={0} color="#ffffff" />
 }
 
 function Lighting({ look, W, L }: { look: Look; W: number; L: number }) {

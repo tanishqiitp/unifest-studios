@@ -1,7 +1,7 @@
 // All distances are metres, weights kg, power watts.
 // Top view: x runs across the venue, y runs from the back of the stage (0) towards the audience.
 
-export type Workspace = 'ground' | 'stage' | 'truss' | 'led' | 'seating' | 'decor' | 'viz' | 'plan' | 'deliver'
+export type Workspace = 'ground' | 'stage' | 'set' | 'truss' | 'led' | 'seating' | 'decor' | 'viz' | 'plan' | 'deliver'
 export type Mode = 'simple' | 'pro'
 export type Units = 'm' | 'ft'
 
@@ -175,6 +175,29 @@ export interface Decor {
   hidden?: string[] // names of model parts switched off
 }
 
+// Scenic set pieces, designed in the front view (Set Design workspace).
+export type SetKind = 'tower' | 'block' | 'frame' | 'arch' | 'ring' | 'pod' | 'booth' | 'scaffold' | 'cutout' | 'tent' | 'stall' | 'balloon' | 'logo'
+export type Skin = 'led' | 'print' | 'fabric' | 'mirror' | 'gold' | 'wood' | 'black' | 'white' | 'paint'
+
+export interface SetPiece {
+  id: string
+  kind: SetKind
+  x: number // centre across the venue
+  y: number // depth: distance from the back of the venue (top view)
+  z: number // bottom elevation
+  w: number
+  h: number
+  d: number // depth of the piece
+  skin: Skin
+  color: string // paint / fabric / print base colour
+  label: string
+  image?: string // artwork, cut-out PNG or logo (data URL)
+  border?: number // frames, arches and rings: thickness of the frame in metres
+  inner?: Skin | 'open' // what fills a frame, arch or ring opening
+  outline?: { style: 'bulb' | 'neon'; color: string; chase: boolean }
+  mirrorOf?: string // live mirror of another piece across the centre line
+}
+
 export interface Brand {
   name: string
   logo?: string // data URL
@@ -286,6 +309,8 @@ export interface Project {
   updatedAt: number
   // Added in v0.3; older projects may not have them.
   decor?: Decor[]
+  set?: SetPiece[]
+  setContent?: string // image (data URL) or video link spread across all LED skins
   brand?: Brand
   quote?: QuoteSettings
   cues?: Cue[]
