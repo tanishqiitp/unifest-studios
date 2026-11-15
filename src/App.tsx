@@ -651,6 +651,8 @@ function useShortcuts() {
           if (kind === 'deck') p.decks = p.decks.filter((d) => d.id !== id)
           if (kind === 'truss') p.truss = p.truss.filter((t) => t.id !== id)
           if (kind === 'hoist') p.hoists = p.hoists.filter((h) => h.id !== id)
+          if (kind === 'set') p.set = (p.set ?? []).filter((x) => x.id !== id && x.mirrorOf !== id)
+          if (kind === 'decor') p.decor = (p.decor ?? []).filter((x) => x.id !== id)
           if (kind === 'table') {
             p.tables = p.tables.filter((t) => t.id !== id)
             p.guests.forEach((g) => g.tableId === id && (g.tableId = undefined))

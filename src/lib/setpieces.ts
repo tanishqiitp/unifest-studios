@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid'
 import type { Project, SetKind, SetPiece, Skin } from '../types'
 
 // Catalogue of scenic blocks: default size (w × h × d, metres), skin and a one-line note.
-export const SET_KINDS: Record<SetKind, { name: string; size: [number, number, number]; skin: Skin; tip: string; group: 'Structure' | 'Shapes' | 'Props' | 'Site' }> = {
+export const SET_KINDS: Record<SetKind, { name: string; size: [number, number, number]; skin: Skin; tip: string; group: 'Structure' | 'Shapes' | 'Props' | 'Site' | 'Drawn' }> = {
   tower: { name: 'Tower', size: [3, 10, 2], skin: 'led', group: 'Structure', tip: 'Tall upright block: facade towers and wings.' },
   block: { name: 'Block', size: [4, 3, 1], skin: 'black', group: 'Structure', tip: 'A box of any size: plinths, walls, header beams.' },
   booth: { name: 'DJ booth', size: [4, 1.2, 1.5], skin: 'led', group: 'Structure', tip: 'DJ or host booth with a front face.' },
@@ -16,6 +16,8 @@ export const SET_KINDS: Record<SetKind, { name: string; size: [number, number, n
   balloon: { name: 'Balloon', size: [4, 4, 4], skin: 'print', group: 'Props', tip: 'Branded hot-air or helium balloon.' },
   tent: { name: 'Tent / canopy', size: [4, 4, 4], skin: 'white', group: 'Site', tip: 'Pagoda tent: ticketing, VIP, merch.' },
   stall: { name: 'Food stall', size: [3, 3, 3], skin: 'paint', group: 'Site', tip: 'Stall with counter and printed fascia.' },
+  shape: { name: 'Drawn shape', size: [3, 3, 0.5], skin: 'paint', group: 'Drawn', tip: 'A shape you drew, pushed out into a solid. Change the push-out to make it thicker.' },
+  line: { name: 'Drawn line', size: [4, 0.15, 0.15], skin: 'white', group: 'Drawn', tip: 'A line you drew: pipes, beams, neon strips. Thickness sets how fat it is.' },
 }
 
 export const SKINS: { id: Skin; name: string }[] = [
@@ -61,7 +63,8 @@ export function syncSetMirrors(p: Project) {
     if (!s.mirrorOf) return s
     const src = p.set!.find((x) => x.id === s.mirrorOf)
     if (!src) return { ...s, mirrorOf: undefined }
-    return { ...src, id: s.id, mirrorOf: src.id, label: s.label, x: 2 * axis - src.x }
+    const pts = src.pts && src.plane !== 'side' ? src.pts.map(([u, v]) => [1 - u, v] as [number, number]) : src.pts
+    return { ...src, id: s.id, mirrorOf: src.id, label: s.label, x: 2 * axis - src.x, rot: src.rot ? -src.rot : src.rot, pts }
   })
 }
 
@@ -203,6 +206,8 @@ export function ledBounds(set: SetPiece[]) {
 
 // LED area for the quote and HUD: whole face, or the opening of a frame/arch/ring filled with LED.
 export function setLedArea(s: SetPiece) {
+  if (s.kind === 'line') return s.skin === 'led' ? lineLength(s) * (s.border ?? 0.15) : 0
+  if (s.kind === 'shape') return s.skin === 'led' ? ((s.plane ?? 'front') === 'front' ? polyArea(s.pts ?? []) * s.w * s.h : s.w * s.h) : 0
   const b = s.border ?? 0
   const face = s.kind === 'ring' ? Math.PI * (s.w / 2) ** 2 : s.kind === 'arch' ? s.w * (s.h - s.w / 2) + (Math.PI * (s.w / 2) ** 2) / 2 : s.w * s.h
   const open = hasOpening(s.kind) ? (s.kind === 'ring' ? Math.PI * Math.max(0, s.w / 2 - b) ** 2 : Math.max(0, s.w - 2 * b) * Math.max(0, s.h - 2 * b)) : 0
@@ -217,6 +222,18 @@ export function outlinePoints(s: SetPiece, step: number): [number, number][] {
   const W = s.w
   const H = s.h
   const pts: [number, number][] = []
+  if ((s.kind === 'shape' || s.kind === 'line') && s.pts && (s.plane ?? 'front') === 'front') {
+    const loop = s.pts.map(([u, v]) => [u * W, (1 - v) * H] as [number, number])
+    const n = s.kind === 'shape' ? loop.length : loop.length - 1
+    for (let i = 0; i < n; i++) {
+      const [x0, y0] = loop[i]
+      const [x1, y1] = loop[(i + 1) % loop.length]
+      const k = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / step))
+      for (let j = 0; j < k; j++) pts.push([x0 + ((x1 - x0) * j) / k, y0 + ((y1 - y0) * j) / k])
+    }
+    if (s.kind === 'line') pts.push(loop[loop.length - 1])
+    return pts
+  }
   if (s.kind === 'ring' || s.kind === 'balloon') {
     const r = Math.min(W, H) / 2
     const n = Math.max(12, Math.round((2 * Math.PI * r) / step))
@@ -244,3 +261,100 @@ export function outlinePoints(s: SetPiece, step: number): [number, number][] {
   return pts
 }
 
+
+// ---------- drawing (CAD-style sketches) ----------
+
+export type DrawTool = 'rect' | 'circle' | 'triangle' | 'poly' | 'line'
+
+// Shoelace area of a closed polygon.
+export function polyArea(pts: [number, number][]) {
+  let a = 0
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i]
+    const [x1, y1] = pts[(i + 1) % pts.length]
+    a += x0 * y1 - x1 * y0
+  }
+  return Math.abs(a) / 2
+}
+
+// Size of the sketch plane (u, v) and the push-out, in metres.
+export function planeSize(s: SetPiece): [number, number, number] {
+  const pl = s.plane ?? 'front'
+  return pl === 'front' ? [s.w, s.h, s.d] : pl === 'top' ? [s.w, s.d, s.h] : [s.d, s.h, s.w]
+}
+
+// Length of a drawn line in metres.
+export function lineLength(s: SetPiece) {
+  const [aw, ah] = planeSize(s)
+  const p = s.pts ?? []
+  let l = 0
+  for (let i = 1; i < p.length; i++) l += Math.hypot((p[i][0] - p[i - 1][0]) * aw, (p[i][1] - p[i - 1][1]) * ah)
+  return l
+}
+
+export const ellipsePts = (n = 40): [number, number][] => Array.from({ length: n }, (_, i) => [0.5 + Math.cos((i / n) * Math.PI * 2) / 2, 0.5 + Math.sin((i / n) * Math.PI * 2) / 2])
+
+// The three flat views. Canvas coordinates: front (x, -z), top (x, y), side (y, -z).
+export type CadView = 'front' | 'top' | 'side'
+
+// Turn points drawn in a view (canvas metres) into a new set piece.
+// ctx gives the missing coordinate: depth for front sketches, height for top sketches, across for side sketches.
+export function pieceFromSketch(view: CadView, tool: DrawTool, pts: { x: number; y: number }[], ctx: { x: number; y: number; z: number }): SetPiece | null {
+  if (pts.length < 2) return null
+  const xs = pts.map((p) => p.x)
+  const ys = pts.map((p) => p.y)
+  const x0 = Math.min(...xs)
+  const x1 = Math.max(...xs)
+  const y0 = Math.min(...ys)
+  const y1 = Math.max(...ys)
+  if (tool !== 'line' && (x1 - x0 < 0.2 || y1 - y0 < 0.2)) return null
+  if (tool === 'line' && Math.hypot(x1 - x0, y1 - y0) < 0.2) return null
+  const a = Math.max(x1 - x0, 0.15)
+  const b = Math.max(y1 - y0, 0.15)
+  // Front and side canvases run y downwards (y = -height), so v is flipped to run up.
+  const up = view !== 'top'
+  const cx = x1 - x0 < 0.15 ? (x0 + x1) / 2 - a / 2 : x0
+  const cy = y1 - y0 < 0.15 ? (y0 + y1) / 2 - b / 2 : y0
+  const norm = (p: { x: number; y: number }): [number, number] => [+((p.x - cx) / a).toFixed(4), +(up ? (cy + b - p.y) / b : (p.y - cy) / b).toFixed(4)]
+  const push = tool === 'line' ? 0.15 : view === 'top' ? 1 : 0.5
+  const size = view === 'front' ? { w: a, h: b, d: push } : view === 'top' ? { w: a, d: b, h: push } : { d: a, h: b, w: push }
+  const mid = { a: cx + a / 2, b: cy + b / 2 }
+  const pos =
+    view === 'front'
+      ? { x: mid.a, z: Math.max(0, -(cy + b)), y: ctx.y }
+      : view === 'top'
+        ? { x: mid.a, y: mid.b, z: ctx.z }
+        : { y: mid.a, z: Math.max(0, -(cy + b)), x: ctx.x }
+  const r = (n: number) => +n.toFixed(2)
+  const base = { z: r(pos.z), w: r(size.w), h: r(size.h), d: r(size.d), color: '#d9d9d9' }
+  if (tool === 'rect') return newPiece('block', r(pos.x), r(pos.y), { ...base, skin: 'paint', label: 'Box' })
+  const shape = tool === 'circle' ? ellipsePts() : tool === 'triangle' ? ([[0, 0], [1, 0], [0.5, 1]] as [number, number][]) : pts.map(norm)
+  return newPiece(tool === 'line' ? 'line' : 'shape', r(pos.x), r(pos.y), {
+    ...base,
+    plane: view,
+    pts: shape,
+    border: tool === 'line' ? 0.15 : undefined,
+    label: tool === 'circle' ? 'Circle' : tool === 'triangle' ? 'Triangle' : tool === 'line' ? 'Line' : 'Shape',
+  })
+}
+
+// Where a piece sits in each flat view: a box in canvas coordinates.
+export function footprint(s: SetPiece, view: CadView) {
+  if (view === 'front') return { x: s.x - s.w / 2, y: -(s.z + s.h), w: s.w, h: s.h }
+  if (view === 'top') return { x: s.x - s.w / 2, y: s.y - s.d / 2, w: s.w, h: s.d }
+  return { x: s.y - s.d / 2, y: -(s.z + s.h), w: s.d, h: s.h }
+}
+
+// Apply a moved / resized box from a view back onto the piece.
+export function fromFootprint(view: CadView, f: { x: number; y: number; w: number; h: number }): Partial<SetPiece> {
+  const r = (n: number) => +n.toFixed(2)
+  if (view === 'front') return { x: r(f.x + f.w / 2), z: r(Math.max(0, -f.y - f.h)), w: r(f.w), h: r(f.h) }
+  if (view === 'top') return { x: r(f.x + f.w / 2), y: r(f.y + f.h / 2), w: r(f.w), d: r(f.h) }
+  return { y: r(f.x + f.w / 2), z: r(Math.max(0, -f.y - f.h)), d: r(f.w), h: r(f.h) }
+}
+
+// The sketch outline of a drawn piece in a view's local box (0..w, 0..h, y down), or null when that view sees it edge-on.
+export function sketchIn(s: SetPiece, view: CadView, w: number, h: number): [number, number][] | null {
+  if (!s.pts || (s.plane ?? 'front') !== view) return null
+  return s.pts.map(([u, v]) => [u * w, view === 'top' ? v * h : (1 - v) * h])
+}

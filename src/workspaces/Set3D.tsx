@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Project, SetPiece, Skin } from '../types'
-import { hasOpening, ledBounds, outlinePoints, SET_KINDS, setLedArea } from '../lib/setpieces'
+import { hasOpening, ledBounds, outlinePoints, planeSize, SET_KINDS, setLedArea } from '../lib/setpieces'
 
 type Info = { title: string; lines: string[] }
 type Span = { x0: number; x1: number; z0: number; z1: number }
 
 // Set pieces from the Set Design workspace. Pieces face the audience (+z in the 3D world).
-export function SetItems({ project, show, dropAt, onInfo }: { project: Project; show: boolean; dropAt: number; onInfo: (i: Info) => void }) {
+export function SetItems({ project, show, dropAt, onInfo, onPick }: { project: Project; show: boolean; dropAt: number; onInfo: (i: Info) => void; onPick?: (id: string) => void }) {
   const set = project.set ?? []
   const span = useMemo(() => ledBounds(set), [set])
   const content = useSetContent(project.setContent)
@@ -20,6 +20,7 @@ export function SetItems({ project, show, dropAt, onInfo }: { project: Project; 
           key={s.id}
           onClick={(e: ThreeEvent<MouseEvent>) => {
             e.stopPropagation()
+            if (onPick) return onPick(s.mirrorOf ?? s.id)
             const a = setLedArea(s)
             onInfo({ title: s.label, lines: [SET_KINDS[s.kind].name, `${s.w} × ${s.h} m, ${s.d} m deep`, `${s.z > 0 ? `${s.z} m off the ground` : 'On the ground'}`, ...(a ? [`${a.toFixed(1)} m² LED`] : [])] })
           }}
@@ -209,7 +210,8 @@ function Piece({ s, span, content, show, dropAt }: { s: SetPiece; span: Span | n
   const left = s.x - s.w / 2
   const front = s.y + s.d / 2
   const solid = skinMat(s.skin, s.color)
-  const open = hasOpening(s.kind)
+  const drawn = s.kind === 'shape' || s.kind === 'line'
+  const open = hasOpening(s.kind) || drawn
   // LED materials only for pieces that show LED: a box face, or a frame/arch/ring face or filling.
   const ledBox = useLedMat(s.skin === 'led' && !open, base, span, left, s.z, s.w, s.h, false, show)
   const ledShape = useLedMat(open && (s.skin === 'led' || s.inner === 'led'), base, span, left, s.z, s.w, s.h, true, show)
@@ -243,7 +245,9 @@ function Piece({ s, span, content, show, dropAt }: { s: SetPiece; span: Span | n
   const innerMat = s.inner === 'led' ? ledShape : s.inner && s.inner !== 'open' ? skinMat(s.inner as Skin, s.color) : null
 
   let body: React.ReactNode
-  if (hasOpening(s.kind)) {
+  if (s.kind === 'shape' || s.kind === 'line') {
+    body = <Sketch s={s} mat={faceMat} />
+  } else if (hasOpening(s.kind)) {
     body = (
       <group position={[left, s.z, s.y - s.d / 2]}>
         <mesh geometry={frameGeo!} material={faceMat} castShadow />
@@ -296,10 +300,57 @@ function Piece({ s, span, content, show, dropAt }: { s: SetPiece; span: Span | n
     body = <BoxPiece s={s} face={faceMat} side={s.skin === 'led' ? skinMat('black', '#000') : solid} />
   }
 
-  return (
-    <group>
+  const inner = (
+    <>
       {body}
       {s.outline && <Outline s={s} front={front} />}
+    </>
+  )
+  if (!s.rot) return <group>{inner}</group>
+  // Turned in the top view: spin about the piece's centre.
+  return (
+    <group position={[s.x, 0, s.y]} rotation-y={-THREE.MathUtils.degToRad(s.rot)}>
+      <group position={[-s.x, 0, -s.y]}>{inner}</group>
+    </group>
+  )
+}
+
+// A drawn sketch on its plane, pushed out into a solid (shapes) or built from beams (lines).
+function Sketch({ s, mat }: { s: SetPiece; mat: THREE.Material }) {
+  const [a, b, push] = planeSize(s)
+  const plane = s.plane ?? 'front'
+  const geo = useMemo(() => {
+    const pts = s.pts ?? []
+    if (s.kind !== 'shape' || pts.length < 3) return null
+    const sh = new THREE.Shape(pts.map(([u, v]) => new THREE.Vector2(u * a, v * b)))
+    return new THREE.ExtrudeGeometry(sh, { depth: push, bevelEnabled: false, curveSegments: 24 })
+  }, [s.kind, s.pts, a, b, push])
+  useEffect(() => () => geo?.dispose(), [geo])
+  const beams = useMemo(() => {
+    if (s.kind !== 'line') return []
+    const t = s.border ?? 0.15
+    const p = (s.pts ?? []).map(([u, v]) => [u * a, v * b])
+    return p.slice(1).map((q, i) => {
+      const [x0, y0] = p[i]
+      const len = Math.hypot(q[0] - x0, q[1] - y0)
+      return { pos: [(x0 + q[0]) / 2, (y0 + q[1]) / 2, push / 2] as [number, number, number], rot: Math.atan2(q[1] - y0, q[0] - x0), size: [len + t, t, push] as [number, number, number] }
+    })
+  }, [s.kind, s.pts, s.border, a, b, push])
+  // Place the sketch plane in the world (see SketchPlane in types.ts).
+  const place =
+    plane === 'front'
+      ? { position: [s.x - s.w / 2, s.z, s.y - s.d / 2] as [number, number, number], rotation: [0, 0, 0] as [number, number, number] }
+      : plane === 'top'
+        ? { position: [s.x - s.w / 2, s.z + s.h, s.y - s.d / 2] as [number, number, number], rotation: [Math.PI / 2, 0, 0] as [number, number, number] }
+        : { position: [s.x + s.w / 2, s.z, s.y - s.d / 2] as [number, number, number], rotation: [0, -Math.PI / 2, 0] as [number, number, number] }
+  return (
+    <group {...place}>
+      {geo && <mesh geometry={geo} material={mat} castShadow receiveShadow />}
+      {beams.map((m, i) => (
+        <mesh key={i} position={m.pos} rotation-z={m.rot} material={mat} castShadow>
+          <boxGeometry args={m.size} />
+        </mesh>
+      ))}
     </group>
   )
 }

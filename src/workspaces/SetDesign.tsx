@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Arc, Circle, Group, Image as KImage, Line, Rect, Text, Transformer } from 'react-konva'
+import { Arc, Arrow, Circle, Ellipse, Group, Image as KImage, Line, Rect, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import { nanoid } from 'nanoid'
-import { Copy, FlipHorizontal2, ImageIcon, Layers, Link2Off, Palette, Trash2, Wand2 } from 'lucide-react'
+import { Box, Circle as CircleIcon, Copy, FlipHorizontal2, ImageIcon, Layers, LayoutGrid, Link2Off, MousePointer2, Palette, Pentagon, PenLine, Square, Trash2, Triangle as TriangleIcon, Wand2 } from 'lucide-react'
 import { useStore } from '../store'
-import type { SetKind, SetPiece, Skin } from '../types'
+import type { Project, SetKind, SetPiece, Skin } from '../types'
 import { PlanCanvas, useView } from '../components/PlanCanvas'
-import { outlinePoints } from '../lib/setpieces'
+import { footprint, fromFootprint, outlinePoints, pieceFromSketch, planeSize, sketchIn, type CadView, type DrawTool } from '../lib/setpieces'
 import { applyTheme, buildKit, hasOpening, KITS, newPiece, SET_KINDS, setLedArea, setLine, SKINS, THEMES } from '../lib/setpieces'
 import { readImage } from './Decor'
 import { Check, Num, Section, Sel, Stat, Txt } from '../components/ui'
 import { fmt } from '../lib/calc'
+import { SetCad3D } from './SetCad3D'
 
 // Flat front-view colours for each skin (the 3D view shows the real materials).
 export const SKIN_FILL: Record<Skin, string> = {
@@ -26,16 +27,13 @@ export const SKIN_FILL: Record<Skin, string> = {
 }
 const fillOf = (s: Skin, color: string) => (s === 'paint' || s === 'fabric' || s === 'print' ? color : SKIN_FILL[s])
 
-// Front view: x across the venue, height up. Konva's y runs down, so the view uses y = -height.
+// CAD-style set designer: front, top and side views plus 3D. Konva's y runs down, so front and side views use y = -height.
 export function SetDesignWorkspace() {
   const project = useStore((s) => s.project)
   const sel = useStore((s) => s.ui.selection)
   const { mutate, select, notify } = useStore.getState()
   const set = project.set ?? []
   const piece = sel?.kind === 'set' ? set.find((p) => p.id === sel.id) : undefined
-  const L = setLine(project)
-  const maxH = Math.max(14, ...set.map((s) => s.z + s.h + 2))
-  const span = Math.max(L.w + 24, ...set.map((s) => Math.abs(s.x - L.cx) * 2 + s.w + 4))
 
   const add = (kind: SetKind) =>
     mutate((p) => {
@@ -108,17 +106,7 @@ export function SetDesignWorkspace() {
         </Section>
       </aside>
 
-      <div className="relative flex-1 min-w-0 bg-[#050505]">
-        <PlanCanvas bounds={{ x: L.cx - span / 2, y: -maxH, w: span, h: maxH + 2 }} grid={{ x: L.cx - span / 2, y: -maxH, w: span, h: maxH }} onBackground={() => select(null)}>
-          <FrontContext />
-          {[...set]
-            .sort((a, b) => a.y - b.y)
-            .map((s) => (
-              <PieceNode key={s.id} s={s} />
-            ))}
-        </PlanCanvas>
-        <div className="absolute left-4 bottom-4 text-[11px] text-mute">Front view, as the audience sees it · drag to move · corners to resize · pieces snap to each other · mirrored pieces follow their twin</div>
-      </div>
+      <SetViews />
 
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {piece ? (
@@ -131,7 +119,7 @@ export function SetDesignWorkspace() {
               <Stat label="Tallest" value={`${fmt(Math.max(0, ...set.map((s) => s.z + s.h)), 1)} m`} />
               <Stat label="Width" value={set.length ? `${fmt(Math.max(...set.map((s) => s.x + s.w / 2)) - Math.min(...set.map((s) => s.x - s.w / 2)), 1)} m` : '—'} />
             </div>
-            <p className="text-[11px] text-mute leading-relaxed">Pick a kit or add blocks on the left. Click a piece to change its size, skin, lights or artwork. Open the 3D view to walk around it and press Drop to fire the effects.</p>
+            <p className="text-[11px] text-mute leading-relaxed">Pick a kit or add blocks on the left, or draw your own with the box, circle, shape and line tools at the bottom. Switch between front, top, side and 3D (or see all 4 at once) to place things exactly. Click a piece to change its size, skin, lights or artwork. Open the 3D view to walk around it and press Drop to fire the effects.</p>
           </Section>
         )}
       </aside>
@@ -173,28 +161,348 @@ function ContentPicker() {
   )
 }
 
-// Ground line, stage decks and existing LED screens in the front view, for reference.
-function FrontContext() {
+// ---------------------------------------------------------------- CAD views
+
+type Layout = CadView | '3d' | 'quad'
+type Tool = 'select' | DrawTool
+const LKEY = 'unifest:setview'
+
+const TOOLS: { id: Tool; name: string; key: string; icon: React.ReactNode; how: string }[] = [
+  { id: 'select', name: 'Select', key: 'V', icon: <MousePointer2 size={15} />, how: 'Click a piece to edit it. Drag to move, corners to resize.' },
+  { id: 'rect', name: 'Box', key: 'R', icon: <Square size={15} />, how: 'Drag to draw a box.' },
+  { id: 'circle', name: 'Circle', key: 'C', icon: <CircleIcon size={15} />, how: 'Drag to draw a circle or oval.' },
+  { id: 'triangle', name: 'Triangle', key: 'T', icon: <TriangleIcon size={15} />, how: 'Drag to draw a triangle.' },
+  { id: 'poly', name: 'Shape', key: 'P', icon: <Pentagon size={15} />, how: 'Click corner by corner. Click the first point (or press Enter) to close it. Hold Shift for straight lines.' },
+  { id: 'line', name: 'Line', key: 'L', icon: <PenLine size={15} />, how: 'Click point by point for a pipe or beam. Press Enter or click the last point again to finish. Hold Shift for straight lines.' },
+]
+
+const VIEW_NAME: Record<CadView, string> = { front: 'Front', top: 'Top', side: 'Side' }
+const VIEW_AXES: Record<CadView, [string, string]> = { front: ['X across', 'Z up'], top: ['X across', 'Y towards audience'], side: ['Y towards audience', 'Z up'] }
+
+function useLayout() {
+  const [layout, setLayout] = useState<Layout>(() => {
+    try {
+      return (localStorage.getItem(LKEY) as Layout) || 'front'
+    } catch {
+      return 'front'
+    }
+  })
+  const pick = (l: Layout) => {
+    setLayout(l)
+    try {
+      localStorage.setItem(LKEY, l)
+    } catch {
+      /* private mode */
+    }
+  }
+  return [layout, pick] as const
+}
+
+function SetViews() {
+  const [layout, setLayout] = useLayout()
+  const [tool, setTool] = useState<Tool>('select')
+  const ws = useStore((s) => s.ui.workspace)
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (ws !== 'set' || e.ctrlKey || e.metaKey || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return
+      const key = e.key.toLowerCase()
+      const t = TOOLS.find((x) => x.key.toLowerCase() === key)
+      if (t) setTool(t.id)
+      if (key === 'escape') setTool('select')
+    }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [ws])
+  const draw = layout !== '3d'
+  const active = TOOLS.find((t) => t.id === tool)!
+  const pane = (v: Layout, compact: boolean) =>
+    v === '3d' ? <SetCad3D compact={compact} /> : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
+  return (
+    <div className="relative flex-1 min-w-0 bg-[#050505]">
+      {layout === 'quad' ? (
+        <div className="absolute left-0 right-16 top-[72px] bottom-16 grid grid-cols-2 grid-rows-2 gap-px bg-line border border-l-0 border-line">
+          {(['front', 'top', 'side', '3d'] as Layout[]).map((v) => (
+            <div key={v} className="relative bg-[#050505] min-w-0 min-h-0 overflow-hidden">
+              {pane(v, true)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        pane(layout, false)
+      )}
+      <div className={`absolute left-1/2 -translate-x-1/2 ${layout === 'quad' ? 'bottom-2' : 'bottom-4'} z-10 flex flex-col items-center gap-1.5 pointer-events-none`}>
+        {draw && tool !== 'select' && <div className="glass rounded-lg px-3 py-1.5 text-[11px] text-dim">{active.how} Esc to stop.</div>}
+        <div className="glass rounded-xl flex items-center gap-1 p-1 pointer-events-auto">
+          {(['front', 'top', 'side', '3d', 'quad'] as Layout[]).map((v) => (
+            <button key={v} className={`btn h-8 px-2.5 text-[11px] ${layout === v ? 'btn-on' : ''}`} title={v === 'quad' ? 'Front, top, side and 3D at once, like CAD' : `${v === '3d' ? '3D' : VIEW_NAME[v as CadView]} view`} onClick={() => setLayout(v)}>
+              {v === 'quad' ? (
+                <>
+                  <LayoutGrid size={13} /> 4 views
+                </>
+              ) : v === '3d' ? (
+                <>
+                  <Box size={13} /> 3D
+                </>
+              ) : (
+                VIEW_NAME[v as CadView]
+              )}
+            </button>
+          ))}
+          <span className="mx-1 h-5 w-px bg-line" />
+          {TOOLS.map((t) => (
+            <button key={t.id} disabled={!draw && t.id !== 'select'} className={`btn btn-icon h-8 w-8 ${tool === t.id ? 'btn-on' : ''}`} title={`${t.name} (${t.key})${t.id === 'select' ? '' : ': draw in the front, top or side view'}`} onClick={() => setTool(t.id)}>
+              {t.icon}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Canvas bounds for each flat view.
+function viewBounds(p: Project, view: CadView) {
+  const L = setLine(p)
+  const set = p.set ?? []
+  const maxH = Math.max(14, ...set.map((s) => s.z + s.h + 2), ...p.truss.map((t) => t.height + 2))
+  const span = Math.max(L.w + 24, ...set.map((s) => Math.abs(s.x - L.cx) * 2 + s.w + 4))
+  const deep = Math.max(L.front + 14, ...set.map((s) => s.y + s.d / 2 + 4))
+  if (view === 'front') return { x: L.cx - span / 2, y: -maxH, w: span, h: maxH + 2 }
+  if (view === 'top') return { x: L.cx - span / 2, y: -2, w: span, h: deep + 2 }
+  return { x: -2, y: -maxH, w: deep + 2, h: maxH + 2 }
+}
+
+// Snap a drawing point to a 0.25 m grid; with Shift, lock it level or plumb to the previous point.
+function snapPt(p: { x: number; y: number }, prev: { x: number; y: number } | undefined, ortho: boolean) {
+  const q = { x: Math.round(p.x * 4) / 4, y: Math.round(p.y * 4) / 4 }
+  if (ortho && prev) Math.abs(q.x - prev.x) > Math.abs(q.y - prev.y) ? (q.y = prev.y) : (q.x = prev.x)
+  return q
+}
+
+function ViewPane({ view, tool, done, compact }: { view: CadView; tool: Tool; done: () => void; compact: boolean }) {
+  const project = useStore((s) => s.project)
+  const { mutate, select, notify } = useStore.getState()
+  const set = project.set ?? []
+  const b = useMemo(() => viewBounds(project, view), [project, view])
+  const [pts, setPts] = useState<{ x: number; y: number }[]>([])
+  const [cur, setCur] = useState<{ x: number; y: number } | null>(null)
+  const dragging = useRef(false)
+  const shift = useRef(false)
+  const drawing = tool !== 'select'
+  const multi = tool === 'poly' || tool === 'line'
+
+  const finish = (all: { x: number; y: number }[], closeTool = tool) => {
+    setPts([])
+    setCur(null)
+    dragging.current = false
+    if (closeTool === 'select') return
+    const L = setLine(useStore.getState().project)
+    const sp = pieceFromSketch(view, closeTool, all, { x: L.cx, y: L.y, z: 0 })
+    if (!sp) return
+    // A shape drawn on top of the stage in the top view sits on the deck.
+    if (view === 'top') {
+      const on = useStore.getState().project.decks.some((d) => sp.x >= d.x && sp.x <= d.x + d.w && sp.y >= d.y && sp.y <= d.y + d.l)
+      if (on) sp.z = L.deckH
+    }
+    mutate((p) => void (p.set ??= []).push(sp))
+    setTimeout(() => select({ kind: 'set', id: sp.id }))
+    notify(`${sp.label} added. Set how far it pushes out on the right.`)
+    done()
+  }
+
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      shift.current = e.shiftKey
+      if (e.type !== 'keydown') return
+      if (e.key === 'Escape') (setPts([]), setCur(null))
+      if (e.key === 'Enter' && multi && pts.length >= 2) finish(pts)
+    }
+    window.addEventListener('keydown', k)
+    window.addEventListener('keyup', k)
+    return () => (window.removeEventListener('keydown', k), window.removeEventListener('keyup', k))
+  })
+  useEffect(() => (setPts([]), setCur(null)), [tool])
+
+  const preview = pts.length ? (multi ? [...pts, ...(cur ? [cur] : [])] : cur ? [pts[0], cur] : pts) : []
+
+  return (
+    <PlanCanvas
+      bounds={b}
+      grid={b}
+      cursor={drawing ? 'crosshair' : undefined}
+      onBackground={() => !drawing && select(null)}
+      onWorldDown={(w) => {
+        if (!drawing) return
+        const p = snapPt(w, pts[pts.length - 1], shift.current)
+        if (!multi) {
+          dragging.current = true
+          setPts([p])
+          setCur(p)
+          return
+        }
+        const tol = Math.max(b.w, b.h) / 120
+        if (tool === 'poly' && pts.length >= 3 && Math.hypot(p.x - pts[0].x, p.y - pts[0].y) < tol) return finish(pts)
+        if (pts.length >= 2 && Math.hypot(p.x - pts[pts.length - 1].x, p.y - pts[pts.length - 1].y) < tol) return finish(pts)
+        setPts([...pts, p])
+      }}
+      onWorldMove={(w) => drawing && (pts.length || !multi) && setCur(snapPt(w, pts[pts.length - 1], shift.current))}
+      onWorldUp={(w) => {
+        if (!drawing || multi || !dragging.current) return
+        finish([pts[0], snapPt(w, undefined, false)])
+      }}
+      overlay={
+        <>
+          <div className={`absolute ${compact ? 'top-2 right-2' : 'top-4 right-4'} glass rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-widest text-dim pointer-events-none`}>
+            {VIEW_NAME[view]} <span className="text-mute normal-case tracking-normal">· {VIEW_AXES[view][0]} · {VIEW_AXES[view][1]}</span>
+          </div>
+          {multi && pts.length >= 2 && (
+            <button className="absolute top-14 right-4 btn h-7 text-[11px]" onClick={() => finish(pts)}>
+              Finish (Enter)
+            </button>
+          )}
+        </>
+      }
+    >
+      <ViewContext view={view} />
+      {[...set]
+        .sort((a, c) => (view === 'front' ? a.y - c.y : view === 'top' ? a.z - c.z : c.x - a.x))
+        .map((s) => (
+          <PieceNode key={s.id} s={s} view={view} listening={!drawing} />
+        ))}
+      <AxisTriad view={view} b={b} />
+      {preview.length > 0 && <Sketch tool={tool as DrawTool} pts={preview} />}
+    </PlanCanvas>
+  )
+}
+
+// Live preview of what is being drawn.
+function Sketch({ tool, pts }: { tool: DrawTool; pts: { x: number; y: number }[] }) {
+  const v = useView()
+  const common = { stroke: '#ffffff', strokeWidth: 1.5, strokeScaleEnabled: false, fill: '#ffffff18', listening: false }
+  const [a, c] = [pts[0], pts[pts.length - 1]]
+  const x = Math.min(a.x, c.x)
+  const y = Math.min(a.y, c.y)
+  const w = Math.abs(c.x - a.x)
+  const h = Math.abs(c.y - a.y)
+  return (
+    <Group listening={false}>
+      {tool === 'rect' && <Rect x={x} y={y} width={w} height={h} {...common} />}
+      {tool === 'circle' && <Ellipse x={x + w / 2} y={y + h / 2} radiusX={w / 2} radiusY={h / 2} {...common} />}
+      {tool === 'triangle' && <Line points={[x, y + h, x + w, y + h, x + w / 2, y]} closed {...common} />}
+      {(tool === 'poly' || tool === 'line') && <Line points={pts.flatMap((p) => [p.x, p.y])} {...common} fill={tool === 'poly' ? '#ffffff18' : undefined} closed={false} />}
+      {(tool === 'poly' || tool === 'line') && pts.slice(0, -1).map((p, i) => <Circle key={i} x={p.x} y={p.y} radius={(i === 0 && tool === 'poly' ? 5 : 3) / v.scale} fill="#fff" />)}
+      {pts.length >= 2 && (
+        <Text
+          x={c.x + 8 / v.scale}
+          y={c.y + 8 / v.scale}
+          text={tool === 'poly' || tool === 'line' ? `${fmt(Math.hypot(c.x - pts[pts.length - 2].x, c.y - pts[pts.length - 2].y), 2)} m` : `${fmt(w, 2)} × ${fmt(h, 2)} m`}
+          fontSize={11 / v.scale}
+          fill="#fff"
+          fontFamily="JetBrains Mono"
+        />
+      )}
+    </Group>
+  )
+}
+
+// Small axis arrows in the corner of each flat view.
+function AxisTriad({ view, b }: { view: CadView; b: { x: number; y: number; w: number; h: number } }) {
+  const v = useView()
+  const len = 40 / v.scale
+  const ox = b.x + 0.6
+  const oy = b.y + b.h - 0.6
+  const [ha, va] = view === 'front' ? ['X', 'Z'] : view === 'top' ? ['X', 'Y'] : ['Y', 'Z']
+  const col: Record<string, string> = { X: '#e5484d', Y: '#3e63dd', Z: '#46a758' }
+  // In the top view Y (towards the audience) points down the screen.
+  const vy = view === 'top' ? len : -len
+  return (
+    <Group listening={false}>
+      <Arrow points={[ox, oy, ox + len, oy]} stroke={col[ha]} fill={col[ha]} strokeWidth={2} strokeScaleEnabled={false} pointerLength={6 / v.scale} pointerWidth={6 / v.scale} />
+      <Arrow points={[ox, oy, ox, oy + vy]} stroke={col[va]} fill={col[va]} strokeWidth={2} strokeScaleEnabled={false} pointerLength={6 / v.scale} pointerWidth={6 / v.scale} />
+      <Text x={ox + len + 4 / v.scale} y={oy - 5 / v.scale} text={ha} fontSize={10 / v.scale} fill={col[ha]} fontFamily="JetBrains Mono" fontStyle="700" />
+      <Text x={ox - 3 / v.scale} y={oy + vy + (view === 'top' ? 4 : -14) / v.scale} text={va} fontSize={10 / v.scale} fill={col[va]} fontFamily="JetBrains Mono" fontStyle="700" />
+    </Group>
+  )
+}
+
+// Ground, stage, truss and a person for scale, drawn for each view.
+function ViewContext({ view }: { view: CadView }) {
   const p = useStore((s) => s.project)
   const v = useView()
   const L = setLine(p)
+  const mono = { fontFamily: 'JetBrains Mono', fill: '#6b6b6b' }
+  const thin = { strokeWidth: 1, strokeScaleEnabled: false }
+  if (view === 'top')
+    return (
+      <Group listening={false}>
+        <Rect x={0} y={0} width={p.venue.w} height={p.venue.l} stroke="#ffffff30" {...thin} dash={[6, 4]} />
+        {p.decks.map((d) => (
+          <Rect key={d.id} x={d.x} y={d.y} width={d.w} height={d.l} fill="#ffffff0d" stroke="#ffffff40" {...thin} />
+        ))}
+        {p.decks.length > 0 && <Text x={L.cx - L.w / 2} y={L.front - 14 / v.scale} width={L.w} align="center" text="STAGE" fontSize={10 / v.scale} {...mono} />}
+        {p.truss.map((t) => (
+          <Line key={t.id} points={[t.x1, t.y1, t.x2, t.y2]} stroke="#9a9a9a" strokeWidth={3} strokeScaleEnabled={false} dash={[2, 2]} />
+        ))}
+        <Line points={[L.cx, -2, L.cx, L.front + 12]} stroke="#ffffff20" {...thin} dash={[10, 6]} />
+        <Text x={L.cx - 50} y={L.front + 4} width={100} align="center" text="AUDIENCE ↓" fontSize={10 / v.scale} {...mono} />
+      </Group>
+    )
+  if (view === 'side') {
+    const ys = p.decks.flatMap((d) => [d.y, d.y + d.l])
+    return (
+      <Group listening={false}>
+        <Line points={[-200, 0, 400, 0]} stroke="#ffffff" opacity={0.5} strokeWidth={1.5} strokeScaleEnabled={false} />
+        {ys.length > 0 && <Rect x={Math.min(...ys)} y={-L.deckH} width={Math.max(...ys) - Math.min(...ys)} height={L.deckH} fill="#ffffff10" stroke="#ffffff55" {...thin} />}
+        {ys.length > 0 && <Text x={Math.min(...ys)} y={-L.deckH + 0.1} width={Math.max(...ys) - Math.min(...ys)} align="center" text="STAGE" fontSize={10 / v.scale} {...mono} />}
+        {p.truss.map((t) => (
+          <Group key={t.id}>
+            <Line points={[Math.min(t.y1, t.y2) - 0.15, -t.height, Math.max(t.y1, t.y2) + 0.15, -t.height]} stroke="#9a9a9a" strokeWidth={3} strokeScaleEnabled={false} />
+            {t.legs && <Line points={[t.y1, 0, t.y1, -t.height]} stroke="#9a9a9a" {...thin} />}
+          </Group>
+        ))}
+        <Person x={L.front + 1.5} />
+        <Text x={L.front + 3} y={6 / v.scale} text="AUDIENCE →" fontSize={10 / v.scale} {...mono} />
+        <HeightMarks x={-1.8} />
+      </Group>
+    )
+  }
   return (
     <Group listening={false}>
       <Line points={[L.cx - 200, 0, L.cx + 200, 0]} stroke="#ffffff" opacity={0.5} strokeWidth={1.5} strokeScaleEnabled={false} />
-      <Text x={L.cx - 100} y={6 / v.scale} text="GROUND" fontSize={10 / v.scale} fill="#6b6b6b" fontFamily="JetBrains Mono" />
-      {p.decks.length > 0 && <Rect x={L.cx - L.w / 2} y={-L.deckH} width={L.w} height={L.deckH} fill="#ffffff10" stroke="#ffffff55" strokeWidth={1} strokeScaleEnabled={false} />}
-      {p.decks.length > 0 && <Text x={L.cx - L.w / 2} y={-L.deckH + 0.1} width={L.w} align="center" text="STAGE" fontSize={10 / v.scale} fill="#6b6b6b" fontFamily="JetBrains Mono" />}
-      {/* Person for scale */}
-      <Group x={L.cx + L.w / 2 + 1} y={0}>
-        <Circle y={-1.6} radius={0.13} stroke="#777" strokeWidth={1} strokeScaleEnabled={false} />
-        <Line points={[0, -1.47, 0, -0.85, -0.2, 0, 0, -0.85, 0.2, 0]} stroke="#777" strokeWidth={1} strokeScaleEnabled={false} />
-        <Line points={[-0.3, -1.2, 0, -1.3, 0.3, -1.2]} stroke="#777" strokeWidth={1} strokeScaleEnabled={false} />
-      </Group>
-      {/* Height marks */}
-      {Array.from({ length: 8 }, (_, i) => (i + 1) * 2.5).map((h) => (
-        <Text key={h} x={L.cx - 200} y={-h - 5 / v.scale} text={`${h} m`} fontSize={9 / v.scale} fill="#3f3f3f" fontFamily="JetBrains Mono" />
+      <Text x={L.cx - 100} y={6 / v.scale} text="GROUND" fontSize={10 / v.scale} {...mono} />
+      {p.decks.length > 0 && <Rect x={L.cx - L.w / 2} y={-L.deckH} width={L.w} height={L.deckH} fill="#ffffff10" stroke="#ffffff55" {...thin} />}
+      {p.decks.length > 0 && <Text x={L.cx - L.w / 2} y={-L.deckH + 0.1} width={L.w} align="center" text="STAGE" fontSize={10 / v.scale} {...mono} />}
+      {p.truss.map((t) => (
+        <Group key={t.id}>
+          <Line points={[Math.min(t.x1, t.x2), -t.height, Math.max(t.x1, t.x2), -t.height]} stroke="#9a9a9a" strokeWidth={3} strokeScaleEnabled={false} />
+          {t.legs && <Line points={[t.x1, 0, t.x1, -t.height, t.x2, -t.height, t.x2, 0]} stroke="#9a9a9a" {...thin} />}
+        </Group>
       ))}
+      <Person x={L.cx + L.w / 2 + 1} />
+      <HeightMarks x={L.cx - 200} />
     </Group>
+  )
+}
+
+function Person({ x }: { x: number }) {
+  return (
+    <Group x={x} y={0}>
+      <Circle y={-1.6} radius={0.13} stroke="#777" strokeWidth={1} strokeScaleEnabled={false} />
+      <Line points={[0, -1.47, 0, -0.85, -0.2, 0, 0, -0.85, 0.2, 0]} stroke="#777" strokeWidth={1} strokeScaleEnabled={false} />
+      <Line points={[-0.3, -1.2, 0, -1.3, 0.3, -1.2]} stroke="#777" strokeWidth={1} strokeScaleEnabled={false} />
+    </Group>
+  )
+}
+
+function HeightMarks({ x }: { x: number }) {
+  const v = useView()
+  return (
+    <>
+      {Array.from({ length: 8 }, (_, i) => (i + 1) * 2.5).map((h) => (
+        <Text key={h} x={x} y={-h - 5 / v.scale} text={`${h} m`} fontSize={9 / v.scale} fill="#3f3f3f" fontFamily="JetBrains Mono" />
+      ))}
+    </>
   )
 }
 
@@ -224,11 +532,12 @@ function snapTo(v: number, half: number, targets: number[], tol: number) {
   return best
 }
 
-function PieceNode({ s }: { s: SetPiece }) {
+function PieceNode({ s, view, listening }: { s: SetPiece; view: CadView; listening: boolean }) {
   const v = useView()
   const sel = useStore((st) => st.ui.selection)
   const set = useStore((st) => st.project.set ?? [])
   const deckH = useStore((st) => setLine(st.project).deckH)
+  const lineY = useStore((st) => setLine(st.project).y)
   const { mutate, select } = useStore.getState()
   const ref = useRef<Konva.Group>(null)
   const tr = useRef<Konva.Transformer>(null)
@@ -240,24 +549,33 @@ function PieceNode({ s }: { s: SetPiece }) {
       tr.current.nodes([ref.current])
       tr.current.getLayer()?.batchDraw()
     }
-  }, [selected, locked])
+  }, [selected, locked, view])
+  const f = footprint(s, view)
   const others = set.filter((o) => o.id !== s.id && o.mirrorOf !== s.id)
-  const xs = others.flatMap((o) => [o.x - o.w / 2, o.x, o.x + o.w / 2])
-  const zs = [0, deckH, ...others.flatMap((o) => [o.z, o.z + o.h])]
+  // Snap targets along the view's horizontal (a) and vertical (b) axes, in canvas coordinates.
+  const boxes = others.map((o) => footprint(o, view))
+  const as = boxes.flatMap((o) => [o.x, o.x + o.w / 2, o.x + o.w])
+  const bs = [...(view === 'top' ? [] : [0, -deckH]), ...boxes.flatMap((o) => [o.y, o.y + o.h])]
   const tol = 10 / v.scale
   const fill = fillOf(s.skin, s.color)
   const stroke = selected ? '#ffffff' : s.outline ? s.outline.color : '#ffffff40'
   const sw = selected ? 2 : s.outline ? 2 : 1
   const b = s.border ?? 0.6
   const innerFill = s.inner === 'open' || !s.inner ? undefined : fillOf(s.inner as Skin, s.color)
+  const rot = view === 'top' ? (s.rot ?? 0) : 0
+  const far = view === 'front' && s.y - lineY > 6
 
   return (
     <>
       <Group
         ref={ref}
-        x={s.x - s.w / 2}
-        y={-(s.z + s.h)}
-        opacity={(locked ? 0.85 : 1) * (s.y - setLine(useStore.getState().project).y > 6 ? 0.4 : 1)}
+        x={f.x + f.w / 2}
+        y={f.y + f.h / 2}
+        offsetX={f.w / 2}
+        offsetY={f.h / 2}
+        rotation={rot}
+        listening={listening}
+        opacity={(locked ? 0.85 : 1) * (far ? 0.4 : 1)}
         draggable={!locked}
         onPointerDown={(e) => {
           e.cancelBubble = true
@@ -265,49 +583,62 @@ function PieceNode({ s }: { s: SetPiece }) {
         }}
         onDragMove={(e) => {
           const n = e.target
-          const cx = snapTo(n.x() + s.w / 2, s.w / 2, xs, tol)
-          const bottom = snapTo(-(n.y() + s.h), 0, zs, tol)
-          const top = snapTo(-(n.y() + s.h) + s.h, 0, zs, tol)
-          const z = Math.abs(top - s.h - -(n.y() + s.h)) < Math.abs(bottom - -(n.y() + s.h)) ? top - s.h : bottom
-          n.position({ x: cx - s.w / 2, y: -(Math.max(0, z) + s.h) })
+          const ca = snapTo(n.x(), f.w / 2, as, tol)
+          let cb = snapTo(n.y(), f.h / 2, bs, tol)
+          if (view !== 'top') cb = Math.min(cb, -f.h / 2) // nothing below the ground
+          n.position({ x: ca, y: cb })
         }}
         onDragEnd={(e) => {
           const n = e.target
-          mutate((p) => {
-            const t = p.set!.find((x) => x.id === s.id)!
-            t.x = +(n.x() + s.w / 2).toFixed(2)
-            t.z = +Math.max(0, -n.y() - s.h).toFixed(2)
-          })
+          mutate((p) => Object.assign(p.set!.find((x) => x.id === s.id)!, fromFootprint(view, { x: n.x() - f.w / 2, y: n.y() - f.h / 2, w: f.w, h: f.h })))
         }}
         onTransformEnd={(e) => {
           const n = e.target
-          const w = Math.max(0.2, Math.round(s.w * n.scaleX() * 4) / 4)
-          const h = Math.max(0.2, Math.round(s.h * n.scaleY() * 4) / 4)
+          const w = Math.max(0.1, Math.round(f.w * n.scaleX() * 4) / 4)
+          const h = Math.max(0.1, Math.round(f.h * n.scaleY() * 4) / 4)
+          const r = Math.round(n.rotation() / 5) * 5
           n.scale({ x: 1, y: 1 })
           mutate((p) => {
             const t = p.set!.find((x) => x.id === s.id)!
-            t.w = w
-            t.h = h
-            t.x = +(n.x() + w / 2).toFixed(2)
-            t.z = +Math.max(0, -n.y() - h).toFixed(2)
+            Object.assign(t, fromFootprint(view, { x: n.x() - w / 2, y: n.y() - h / 2, w, h }))
+            if (view === 'top') t.rot = ((r % 360) + 360) % 360 || undefined
           })
         }}
       >
-        <Shape2D s={s} fill={fill} stroke={stroke} sw={sw} b={b} innerFill={innerFill} img={img} />
-        {s.outline && <Bulbs s={s} />}
+        {view === 'front' ? <Shape2D s={s} fill={fill} stroke={stroke} sw={sw} b={b} innerFill={innerFill} img={img} /> : <Flat2D s={s} view={view} w={f.w} h={f.h} fill={fill} stroke={stroke} sw={sw} />}
+        {view === 'front' && s.outline && <Bulbs s={s} />}
       </Group>
       {v.scale > 6 && (
-        <Text x={s.x - s.w / 2} y={-(s.z + s.h) - 12 / v.scale} width={s.w} align="center" text={`${s.label}${s.mirrorOf ? ' ⇄' : ''}`} fontSize={9 / v.scale} fill="#8a8a8a" fontFamily="Inter" listening={false} />
+        <Text x={f.x} y={f.y - 12 / v.scale} width={f.w} align="center" text={`${s.label}${s.mirrorOf ? ' ⇄' : ''}`} fontSize={9 / v.scale} fill="#8a8a8a" fontFamily="Inter" listening={false} />
       )}
-      {selected && !locked && <Transformer ref={tr} rotateEnabled={false} keepRatio={false} borderStroke="#fff" anchorStroke="#fff" anchorFill="#000" anchorSize={8} />}
+      {selected && !locked && listening && (
+        <Transformer ref={tr} rotateEnabled={view === 'top'} rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]} keepRatio={false} borderStroke="#fff" anchorStroke="#fff" anchorFill="#000" anchorSize={8} />
+      )}
     </>
   )
 }
+
+// A piece seen from above or from the side: its sketch if it was drawn on that plane, else its outline.
+function Flat2D({ s, view, w, h, fill, stroke, sw }: { s: SetPiece; view: CadView; w: number; h: number; fill: string; stroke: string; sw: number }) {
+  const common = { stroke, strokeWidth: sw, strokeScaleEnabled: false }
+  const sk = sketchIn(s, view, w, h)
+  if (sk && s.kind === 'line') return <Line points={sk.flat()} {...common} stroke={selectedOr(stroke, fill)} strokeWidth={Math.max(2, sw)} hitStrokeWidth={12} />
+  if (sk) return <Line points={sk.flat()} closed fill={fill} {...common} />
+  if (view === 'top' && (s.kind === 'pod' || s.kind === 'balloon')) return <Ellipse x={w / 2} y={h / 2} radiusX={w / 2} radiusY={h / 2} fill={fill} {...common} />
+  if (view === 'side' && s.kind === 'balloon') return <Circle x={w / 2} y={w / 2} radius={Math.min(w, h) / 2} fill={fill} {...common} />
+  return <Rect width={w} height={h} fill={fill} opacity={s.kind === 'scaffold' ? 0.4 : 1} {...common} />
+}
+const selectedOr = (stroke: string, fill: string) => (stroke === '#ffffff40' ? fill : stroke)
 
 function Shape2D({ s, fill, stroke, sw, b, innerFill, img }: { s: SetPiece; fill: string; stroke: string; sw: number; b: number; innerFill?: string; img: HTMLImageElement | null }) {
   const common = { stroke, strokeWidth: sw, strokeScaleEnabled: false }
   const W = s.w
   const H = s.h
+  if (s.kind === 'shape' || s.kind === 'line') {
+    const sk = sketchIn(s, 'front', W, H)
+    if (!sk) return <Rect width={W} height={H} fill={fill} {...common} />
+    return s.kind === 'line' ? <Line points={sk.flat()} {...common} stroke={selectedOr(stroke, fill)} strokeWidth={Math.max(2, sw)} hitStrokeWidth={12} /> : <Line points={sk.flat()} closed fill={fill} {...common} />
+  }
   switch (s.kind) {
     case 'frame':
       return (
@@ -458,15 +789,35 @@ function PieceProps({ s }: { s: SetPiece }) {
       >
         <p className="text-[11px] text-mute">{info.tip}</p>
         <Txt label="Name" value={s.label} onChange={(label) => up({ label })} />
+        <div className="text-[10px] uppercase tracking-wider text-mute">Size</div>
         <div className="grid grid-cols-3 gap-2">
-          <Num label="Width" value={s.w} onChange={(w) => up({ w: Math.max(0.2, w) })} unit="m" step={0.5} />
-          <Num label="Height" value={s.h} onChange={(h) => up({ h: Math.max(0.2, h) })} unit="m" step={0.5} />
-          <Num label="Depth" value={s.d} onChange={(d) => up({ d: Math.max(0.05, d) })} unit="m" step={0.1} />
+          <Num label="Width (X)" value={s.w} onChange={(w) => up({ w: Math.max(0.1, w) })} unit="m" step={0.5} />
+          <Num label="Height (Z)" value={s.h} onChange={(h) => up({ h: Math.max(0.1, h) })} unit="m" step={0.5} />
+          <Num label="Depth (Y)" value={s.d} onChange={(d) => up({ d: Math.max(0.05, d) })} unit="m" step={0.1} />
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Num label="Off the ground" value={s.z} onChange={(z) => up({ z: Math.max(0, z) })} unit="m" step={0.5} tip="Height of the bottom edge. Put a header beam on top of towers this way." />
-          <Num label="Distance from back" value={s.y} onChange={(y) => up({ y })} unit="m" step={0.5} tip="How far from the back of the venue it stands. Bigger numbers come forward, towards the audience." />
+        {(s.kind === 'shape' || s.kind === 'line') && (
+          <div className="grid grid-cols-2 gap-2">
+            <Num
+              label="Push out"
+              value={planeSize(s)[2]}
+              onChange={(n) => {
+                const v = Math.max(0.02, n)
+                up((s.plane ?? 'front') === 'front' ? { d: v } : s.plane === 'top' ? { h: v } : { w: v })
+              }}
+              unit="m"
+              step={0.1}
+              tip="How far the drawing is pushed out into a solid (like Extrude in CAD)."
+            />
+            {s.kind === 'line' && <Num label="Thickness" value={s.border ?? 0.15} onChange={(n) => up({ border: Math.max(0.02, n) })} unit="m" step={0.05} tip="How fat the pipe or beam is." />}
+          </div>
+        )}
+        <div className="text-[10px] uppercase tracking-wider text-mute">Position</div>
+        <div className="grid grid-cols-3 gap-2">
+          <Num label="Across (X)" value={s.x} onChange={(x) => up({ x })} unit="m" step={0.25} tip="Centre of the piece across the venue." />
+          <Num label="Depth (Y)" value={s.y} onChange={(y) => up({ y })} unit="m" step={0.5} tip="How far from the back of the venue it stands. Bigger numbers come forward, towards the audience." />
+          <Num label="Up (Z)" value={s.z} onChange={(z) => up({ z: Math.max(0, z) })} unit="m" step={0.5} tip="Height of the bottom edge off the ground. Put a header beam on top of towers this way." />
         </div>
+        <Num label="Turn" value={s.rot ?? 0} onChange={(r) => up({ rot: ((Math.round(r) % 360) + 360) % 360 || undefined })} unit="°" step={15} tip="Turn the piece as seen from above. You can also use the round handle in the top view." />
         <div className="grid grid-cols-3 gap-1">
           <button className="btn justify-center text-[11px]" title="Move to the stage centre line" onClick={() => up({ x: setLine(useStore.getState().project).cx })}>
             Centre

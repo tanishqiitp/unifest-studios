@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generateProject, TEMPLATES } from '../templates'
-import { applyTheme, buildKit, KITS, ledBounds, newPiece, setLedArea, syncSetMirrors } from '../setpieces'
+import { applyTheme, buildKit, footprint, fromFootprint, KITS, ledBounds, lineLength, newPiece, pieceFromSketch, polyArea, setLedArea, syncSetMirrors } from '../setpieces'
 import { fullEquipment, quoteLines } from '../quote'
 import { liteProject } from '../export/files'
 
@@ -56,4 +56,49 @@ describe('set pieces', () => {
     expect(lite.set?.[0].image).toBeUndefined()
     expect(liteProject(p, true).set?.[0].image).toBeDefined()
   })
+})
+
+describe('drawing set pieces', () => {
+  it('a box dragged in the front view becomes a block standing on the ground', () => {
+    const s = pieceFromSketch('front', 'rect', [{ x: 10, y: -4 }, { x: 14, y: 0 }], { x: 0, y: 2, z: 0 })!
+    expect(s.kind).toBe('block')
+    expect([s.x, s.z, s.w, s.h, s.y]).toEqual([12, 0, 4, 4, 2])
+  })
+
+  it('a shape drawn in the top view is pushed up and keeps its outline', () => {
+    const s = pieceFromSketch('top', 'poly', [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 2 }], { x: 0, y: 0, z: 1 })!
+    expect(s.kind).toBe('shape')
+    expect(s.plane).toBe('top')
+    expect([s.w, s.d, s.z]).toEqual([4, 2, 1])
+    expect(s.pts).toEqual([[0, 0], [1, 0], [0, 1]])
+  })
+
+  it('a line keeps its length and LED area follows its thickness', () => {
+    const s = pieceFromSketch('side', 'line', [{ x: 0, y: 0 }, { x: 3, y: -4 }], { x: 5, y: 0, z: 0 })!
+    expect(s.kind).toBe('line')
+    expect(lineLength(s)).toBeCloseTo(5)
+    expect(setLedArea({ ...s, skin: 'led', border: 0.2 })).toBeCloseTo(1)
+  })
+
+  it('footprints round-trip in every view', () => {
+    const s = newPiece('tower', 10, 3, { z: 1, rot: 30 })
+    for (const v of ['front', 'top', 'side'] as const) {
+      const back = fromFootprint(v, footprint(s, v))
+      for (const [k, val] of Object.entries(back)) expect(val).toBeCloseTo(s[k as 'x'] as number)
+    }
+  })
+
+  it('mirrors flip drawn outlines and turns', () => {
+    const p = proj()
+    const a = pieceFromSketch('front', 'triangle', [{ x: 1, y: -3 }, { x: 4, y: 0 }], { x: 0, y: 2, z: 0 })!
+    a.pts = [[0, 0], [1, 0], [0, 1]]
+    a.rot = 20
+    p.set = [a, { ...a, id: 'm', mirrorOf: a.id }]
+    syncSetMirrors(p)
+    const m = p.set.find((s) => s.id === 'm')!
+    expect(m.pts).toEqual([[1, 0], [0, 0], [1, 1]])
+    expect(m.rot).toBe(-20)
+  })
+
+  it('area of a unit right triangle', () => expect(polyArea([[0, 0], [1, 0], [0, 1]])).toBeCloseTo(0.5))
 })

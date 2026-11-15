@@ -176,7 +176,7 @@ export interface Decor {
 }
 
 // Scenic set pieces, designed in the front view (Set Design workspace).
-export type SetKind = 'tower' | 'block' | 'frame' | 'arch' | 'ring' | 'pod' | 'booth' | 'scaffold' | 'cutout' | 'tent' | 'stall' | 'balloon' | 'logo'
+export type SetKind = 'tower' | 'block' | 'frame' | 'arch' | 'ring' | 'pod' | 'booth' | 'scaffold' | 'cutout' | 'tent' | 'stall' | 'balloon' | 'logo' | 'shape' | 'line'
 export type Skin = 'led' | 'print' | 'fabric' | 'mirror' | 'gold' | 'wood' | 'black' | 'white' | 'paint'
 
 export interface SetPiece {
@@ -196,7 +196,14 @@ export interface SetPiece {
   inner?: Skin | 'open' // what fills a frame, arch or ring opening
   outline?: { style: 'bulb' | 'neon'; color: string; chase: boolean }
   mirrorOf?: string // live mirror of another piece across the centre line
+  rot?: number // turn in the top view, degrees
+  // Drawn pieces ('shape' and 'line'): a sketch on one plane, pushed out through the third axis.
+  plane?: SketchPlane
+  pts?: [number, number][] // sketch points as 0..1 of the plane size; v runs up (front, side) or towards the audience (top)
 }
+
+// front: across x up, pushed back by the depth. top: across x depth, pushed up by the height. side: depth x up, pushed across by the width.
+export type SketchPlane = 'front' | 'top' | 'side'
 
 export interface Brand {
   name: string
