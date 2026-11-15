@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
-import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, Sky, Stars } from '@react-three/drei'
+import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, PerformanceMonitor, Sky, Stars } from '@react-three/drei'
 import { useDevice } from '../lib/device'
 import { Bloom, EffectComposer, ToneMapping, Vignette } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
@@ -21,6 +21,10 @@ RectAreaLightUniformsLib.init()
 
 type Preset = 'audience' | 'last' | 'foh' | 'stage' | 'drone' | 'side'
 export type Look = 'show' | 'day' | 'tech'
+// Draft: fastest, for big rigs on basic laptops. Show: default. Best: sharpest, with shadows.
+export type Quality = 'draft' | 'show' | 'best'
+type QualityPref = 'auto' | Quality
+const QKEY = 'unifest:quality'
 export type Palette = 'white' | 'warm' | 'ice' | 'duo' | 'rainbow'
 type RecordReq = { aspect: '16:9' | '9:16'; seconds: number; id: number }
 export type ViewCmd = { kind: 'rotate' | 'tilt' | 'zoom' | 'set-az' | 'set-el' | 'view' | 'reset'; value: number | string; n: number }
@@ -60,6 +64,25 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [showcase, setShowcase] = useState(!!compact)
   // Phones get lighter rendering so the 3D view stays smooth and the battery lasts.
   const lowPower = useDevice((d) => d.kind === 'phone') || !!compact
+  const [qPref, setQPref] = useState<QualityPref>(() => {
+    try {
+      return (localStorage.getItem(QKEY) as QualityPref) || 'auto'
+    } catch {
+      return 'auto'
+    }
+  })
+  // Auto starts at Show (Draft on phones) and drops to Draft if the frame rate stays low.
+  const [slow, setSlow] = useState(false)
+  const quality: Quality = qPref === 'auto' ? (lowPower || slow ? 'draft' : 'show') : qPref
+  const pickQuality = (q: QualityPref) => {
+    setQPref(q)
+    setSlow(false)
+    try {
+      localStorage.setItem(QKEY, q)
+    } catch {
+      /* private mode */
+    }
+  }
   const [video, setVideo] = useState<string | null>(null)
   const [shotReq, setShotReq] = useState(0)
   const [rec, setRec] = useState<RecordReq | null>(null)
@@ -110,8 +133,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   return (
     <div className="relative h-full w-full overflow-hidden" style={{ background: bg }}>
       <Canvas
-        shadows={!lowPower}
-        dpr={[1, lowPower ? 1.5 : 2]}
+        shadows={quality === 'best' || (quality === 'show' && !lowPower)}
+        dpr={quality === 'draft' ? 1 : quality === 'show' ? [1, 1.25] : [1, 2]}
         gl={{ preserveDrawingBuffer: true, antialias: true, powerPreference: 'high-performance' }}
         camera={{ fov: 50, near: 0.1, far: 3000, position: [0, 20, 60] }}
         onPointerMissed={() => setInfo(null)}
@@ -141,6 +164,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
           viewCmd={viewCmd}
           onAngles={setAngles}
           dropAt={dropAt}
+          quality={quality}
+          onSlow={() => qPref === 'auto' && setSlow(true)}
         />
       </Canvas>
 
@@ -211,6 +236,12 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
                 e.target.value = ''
               }}
             />
+            <select className="h-8 rounded-lg border border-line bg-raised px-2 text-xs" style={{ width: 'auto' }} title="Draft is fastest for big rigs on basic laptops; Best is sharpest. Auto drops to Draft if the view gets slow." value={qPref} onChange={(e) => pickQuality(e.target.value as QualityPref)}>
+              <option value="auto">Auto{qPref === 'auto' ? ` (${quality})` : ''}</option>
+              <option value="draft">Draft</option>
+              <option value="show">Show</option>
+              <option value="best">Best</option>
+            </select>
             <button className="btn h-8" title="Fire every effect at once: pyro, CO₂, flames, a strobe flash and the LED flash" onClick={() => (setDropAt(performance.now()), setShowcase(false))}>
               <Zap size={14} /> Drop
             </button>
@@ -386,6 +417,8 @@ function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd[
 
 interface SceneProps {
   dropAt: number
+  quality: Quality
+  onSlow: () => void
   project: Project
   preset: Preset
   camReq: number
@@ -417,7 +450,7 @@ function focusOf(project: Project) {
 }
 
 function Scene(props: SceneProps) {
-  const { project, preset, camReq, look, palette, motion, crowd, labels, showcase, video, shotReq, rec, compact, onInfo, dropAt } = props
+  const { project, preset, camReq, look, palette, motion, crowd, labels, showcase, video, shotReq, rec, compact, onInfo, dropAt, quality } = props
   const controls = useRef<OrbitImpl>(null)
   const { camera, gl, scene, size, setSize, setDpr, viewport } = useThree()
   const f = useMemo(() => focusOf(project), [project])
@@ -425,6 +458,10 @@ function Scene(props: SceneProps) {
   // A camera move in progress: straight to a point, or around the target along a sphere.
   const fly = useRef<{ pos: THREE.Vector3; target: THREE.Vector3; sph?: THREE.Spherical } | null>(null)
   const show = look === 'show'
+  // ?debug3d in the address exposes the renderer for performance checks.
+  useEffect(() => {
+    if (location.search.includes('debug3d')) (window as unknown as { __u3d: unknown }).__u3d = { gl, scene }
+  }, [gl, scene])
 
   useEffect(() => {
     if (look === 'tech') {
@@ -593,9 +630,9 @@ function Scene(props: SceneProps) {
       {rec && <Recorder req={rec} focus={f} setSize={setSize} size={size} setDpr={setDpr} dpr={viewport.dpr} onProgress={props.onRecProgress} onDone={props.onRecDone} controls={controls} />}
 
       <Lighting look={look} W={W} L={L} />
-      <Ground project={project} look={look} compact={compact} />
+      <Ground project={project} look={look} compact={compact} reflect={quality === 'best' || (quality === 'show' && project.fixtures.length <= 150)} />
       <GroundItems project={project} look={look} />
-      {crowd && <Crowd project={project} look={look} motion={motion} compact={compact} />}
+      {crowd && <Crowd project={project} look={look} motion={motion} compact={compact || quality === 'draft'} />}
       <Furniture project={project} look={look} onInfo={onInfo} />
       <StageDecks project={project} look={look} onInfo={onInfo} />
       {project.truss.map((t) => (
@@ -605,14 +642,15 @@ function Scene(props: SceneProps) {
       {project.screens.map((s) => (
         <ScreenMesh key={s.id} s={s} project={project} content={content} look={look} onInfo={onInfo} />
       ))}
-      <Fixtures project={project} look={look} palette={palette} motion={motion} />
+      <Fixtures project={project} look={look} palette={palette} motion={motion} quality={quality} />
+      <PerformanceMonitor onDecline={props.onSlow} flipflops={2} />
       <SetItems project={project} show={show} dropAt={dropAt} onInfo={onInfo} />
       <DecorItems project={project} show={show} motion={motion} dropAt={dropAt} onInfo={onInfo} />
       <DropFlash dropAt={dropAt} />
       {labels && <Labels project={project} look={look} />}
 
       {show && (
-        <EffectComposer multisampling={useDevice.getState().kind === 'phone' || compact ? 0 : 4}>
+        <EffectComposer multisampling={quality === 'draft' || useDevice.getState().kind === 'phone' || compact ? 0 : quality === 'best' ? 8 : 2}>
           <Bloom mipmapBlur luminanceThreshold={0.85} luminanceSmoothing={0.2} intensity={1.1} radius={0.75} />
           <Vignette offset={0.25} darkness={0.75} />
           <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
@@ -665,7 +703,8 @@ function Lighting({ look, W, L }: { look: Look; W: number; L: number }) {
   )
 }
 
-function Ground({ project, look, compact }: { project: Project; look: Look; compact: boolean }) {
+// The mirror-like floor re-draws the whole scene, so big rigs only get it in Best quality.
+function Ground({ project, look, compact, reflect }: { project: Project; look: Look; compact: boolean; reflect: boolean }) {
   const W = project.venue.w
   const L = project.venue.l
   const tex = useVenueImage(project)
@@ -679,7 +718,7 @@ function Ground({ project, look, compact }: { project: Project; look: Look; comp
     <>
       <mesh rotation-x={-Math.PI / 2} position={[W / 2, -0.01, L / 2]} receiveShadow>
         <planeGeometry args={[W + 400, L + 400]} />
-        {look === 'show' && !compact ? (
+        {look === 'show' && !compact && reflect ? (
           <MeshReflectorMaterial
             blur={[400, 120]}
             resolution={512}
@@ -694,7 +733,7 @@ function Ground({ project, look, compact }: { project: Project; look: Look; comp
             mirror={0}
           />
         ) : (
-          <meshStandardMaterial color={look === 'tech' ? '#e4e4e4' : look === 'day' ? '#55584f' : '#080808'} roughness={1} />
+          <meshStandardMaterial color={look === 'tech' ? '#e4e4e4' : look === 'day' ? '#55584f' : '#080808'} roughness={look === 'show' ? 0.35 : 1} metalness={look === 'show' ? 0.5 : 0} />
         )}
       </mesh>
       {/* Venue floor */}
@@ -1433,9 +1472,10 @@ function TableMesh({ t, cloth }: { t: Table; cloth: string }) {
 // ---------------------------------------------------------------- crowd
 
 function personGeometry() {
-  const body = new THREE.CapsuleGeometry(0.19, 0.8, 3, 8)
+  // Low-poly on purpose: thousands are drawn at once and nobody sees facets at crowd distance.
+  const body = new THREE.CapsuleGeometry(0.19, 0.8, 2, 6)
   body.translate(0, 0.6 + 0.19, 0)
-  const head = new THREE.SphereGeometry(0.11, 10, 8)
+  const head = new THREE.SphereGeometry(0.11, 6, 4)
   head.translate(0, 1.62, 0)
   const g = mergeGeometries([body, head])!
   body.dispose()
@@ -1566,30 +1606,6 @@ function Crowd({ project, look, motion, compact }: { project: Project; look: Loo
 
 // ---------------------------------------------------------------- lights and audio
 
-const beamVertex = /* glsl */ `
-  varying float vAlong;
-  varying vec3 vN;
-  varying vec3 vV;
-  void main() {
-    vAlong = -position.y;
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    vV = normalize(-mv.xyz);
-    vN = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * mv;
-  }
-`
-const beamFragment = /* glsl */ `
-  uniform vec3 color;
-  uniform float opacity;
-  varying float vAlong;
-  varying vec3 vN;
-  varying vec3 vV;
-  void main() {
-    float edge = pow(abs(dot(normalize(vN), normalize(vV))), 2.0);
-    float fall = pow(clamp(1.0 - vAlong, 0.0, 1.0), 1.4);
-    gl_FragColor = vec4(color * opacity * edge * fall, 1.0);
-  }
-`
 // Unit cone with its tip at the origin, opening down -Y to a radius of 1 at y = -1.
 const beamGeom = (() => {
   const g = new THREE.ConeGeometry(1, 1, 32, 1, true)
@@ -1626,15 +1642,17 @@ function paletteColor(p: Palette, i: number, t: number, out: THREE.Color) {
 
 const HALF_ANGLE: Record<Fixture['kind'], number> = { 'moving-head': 0.14, beam: 0.035, par: 0.32, blinder: 0, 'line-array': 0, sub: 0 }
 
-function Fixtures({ project, look, palette, motion }: { project: Project; look: Look; palette: Palette; motion: boolean }) {
+function Fixtures({ project, look, palette, motion, quality }: { project: Project; look: Look; palette: Palette; motion: boolean; quality: Quality }) {
   const cx = project.venue.w / 2
+  const lights = useMemo(() => project.fixtures.filter((f) => f.kind !== 'sub' && f.kind !== 'line-array'), [project.fixtures])
   return (
     <>
-      {project.fixtures.map((f, i) => {
+      {project.fixtures.map((f) => {
         if (f.kind === 'sub') return <Sub key={f.id} f={f} />
         if (f.kind === 'line-array') return <LineArray key={f.id} f={f} cx={cx} />
-        return <Light key={f.id} f={f} i={i} on={look === 'show'} palette={palette} motion={motion} haze={project.look?.haze ?? 0.3} />
+        return null
       })}
+      <Rig lights={lights} on={look === 'show'} palette={palette} motion={motion} haze={project.look?.haze ?? 0.3} quality={quality} />
     </>
   )
 }
@@ -1682,116 +1700,200 @@ function LineArray({ f, cx }: { f: Fixture; cx: number }) {
   )
 }
 
-function Light({ f, i, on, palette, motion, haze }: { f: Fixture; i: number; on: boolean; palette: Palette; motion: boolean; haze: number }) {
-  const head = useRef<THREE.Group>(null)
-  const beam = useRef<THREE.Mesh>(null)
-  const pool = useRef<THREE.Mesh>(null)
-  const lens = useRef<THREE.MeshBasicMaterial>(null)
-  const half = f.beam ? THREE.MathUtils.degToRad(f.beam / 2) : HALF_ANGLE[f.kind]
-  const level = f.intensity ?? 1
-  const reach = f.reach ?? 45
-  const fixed = f.aim === 'fixed'
-  const own = useMemo(() => (f.color ? new THREE.Color(f.color) : null), [f.color])
-  const mat = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        uniforms: { color: { value: new THREE.Color() }, opacity: { value: (f.kind === 'par' ? 0.12 : f.kind === 'beam' ? 0.75 : 0.32) * (0.4 + haze * 1.2) * level } },
-        vertexShader: beamVertex,
-        fragmentShader: beamFragment,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-      }),
-    [f.kind, haze, level],
-  )
-  const poolMat = useMemo(() => new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), [])
-  useEffect(() => () => (mat.dispose(), poolMat.dispose()), [mat, poolMat])
+// All lights drawn as instanced meshes: one draw call per part (base, head, lens, beam, floor pool)
+// for the whole rig, so a festival rig with hundreds of fixtures stays smooth on ordinary laptops.
+const beamInstVertex = /* glsl */ `
+  varying float vAlong;
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vCol;
+  void main() {
+    vAlong = -position.y;
+    vCol = vec3(1.0);
+    #ifdef USE_INSTANCING_COLOR
+      vCol = instanceColor;
+    #endif
+    vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+    vV = normalize(-mv.xyz);
+    vN = normalize(normalMatrix * mat3(instanceMatrix) * normal);
+    gl_Position = projectionMatrix * mv;
+  }
+`
+const beamInstFragment = /* glsl */ `
+  varying float vAlong;
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vCol;
+  void main() {
+    float edge = pow(abs(dot(normalize(vN), normalize(vV))), 2.0);
+    float fall = pow(clamp(1.0 - vAlong, 0.0, 1.0), 1.4);
+    gl_FragColor = vec4(vCol * edge * fall, 1.0);
+  }
+`
+const headGeo = new THREE.CylinderGeometry(0.13, 0.16, 0.34, 12)
+const baseGeo = new THREE.BoxGeometry(0.32, 0.1, 0.24)
+const lensGeo = new THREE.CircleGeometry(0.12, 16)
+const blinderGeo = new THREE.BoxGeometry(0.5, 0.1, 0.5)
+const blinderLensGeo = new THREE.PlaneGeometry(0.42, 0.42)
+const poolGeo = new THREE.PlaneGeometry(1, 1)
+const BEAM_OPACITY: Partial<Record<Fixture['kind'], number>> = { par: 0.12, beam: 0.75, 'moving-head': 0.32 }
+type IRef = { current: THREE.InstancedMesh | null }
 
-  const tmp = useMemo(() => ({ d: new THREE.Vector3(), q: new THREE.Quaternion(), c: new THREE.Color(), down: new THREE.Vector3(0, -1, 0) }), [])
+function Rig({ lights, on, palette, motion, haze, quality }: { lights: Fixture[]; on: boolean; palette: Palette; motion: boolean; haze: number; quality: Quality }) {
+  const heads = useMemo(() => lights.filter((f) => f.kind !== 'blinder'), [lights])
+  const blinders = useMemo(() => lights.filter((f) => f.kind === 'blinder'), [lights])
+  // Draft quality draws every second beam on very big rigs.
+  const beamEvery = quality === 'draft' && heads.length > 120 ? 2 : 1
+  const beamMat = useMemo(() => new THREE.ShaderMaterial({ vertexShader: beamInstVertex, fragmentShader: beamInstFragment, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }), [])
+  const poolMat = useMemo(() => new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), [])
+  const lensMat = useMemo(() => new THREE.MeshBasicMaterial({ toneMapped: false, side: THREE.DoubleSide }), [])
+  useEffect(() => () => (beamMat.dispose(), poolMat.dispose(), lensMat.dispose()), [beamMat, poolMat, lensMat])
+  const meshes = useMemo(() => {
+    const mk = (geo: THREE.BufferGeometry, mat: THREE.Material, n: number, color: boolean) => {
+      if (!n) return null
+      const m = new THREE.InstancedMesh(geo, mat, n)
+      m.frustumCulled = false
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      if (color) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3)
+      return m
+    }
+    return {
+      base: mk(baseGeo, blackMetal, lights.length, false),
+      head: mk(headGeo, blackMetal, heads.length, false),
+      lens: mk(lensGeo, lensMat, heads.length, true),
+      beam: mk(beamGeom, beamMat, heads.length, true),
+      pool: mk(poolGeo, poolMat, heads.length, true),
+      bBody: mk(blinderGeo, blackMetal, blinders.length, false),
+      bLens: mk(blinderLensGeo, lensMat, blinders.length, true),
+    }
+  }, [lights.length, heads.length, blinders.length, beamMat, poolMat, lensMat])
+  if (meshes.pool) meshes.pool.renderOrder = 2
+  const base = { current: meshes.base }
+  const head = { current: meshes.head }
+  const lens = { current: meshes.lens }
+  const beam = { current: meshes.beam }
+  const pool = { current: meshes.pool }
+  const bBody = { current: meshes.bBody }
+  const bLens = { current: meshes.bLens }
+  const all = [base, head, lens, beam, pool, bBody, bLens]
+  const own = useMemo(() => new Map(lights.map((f) => [f.id, f.color ? new THREE.Color(f.color) : null])), [lights])
+  const index = useMemo(() => new Map(lights.map((f, i) => [f.id, i])), [lights])
+  const tmp = useMemo(
+    () => ({
+      m: new THREE.Matrix4(),
+      m2: new THREE.Matrix4(),
+      p: new THREE.Vector3(),
+      p2: new THREE.Vector3(),
+      sc: new THREE.Vector3(),
+      d: new THREE.Vector3(),
+      q: new THREE.Quaternion(),
+      c: new THREE.Color(),
+      c2: new THREE.Color(),
+      down: new THREE.Vector3(0, -1, 0),
+      one: new THREE.Vector3(1, 1, 1),
+      flat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2),
+      lensRot: new THREE.Matrix4().makeRotationX(Math.PI / 2),
+    }),
+    [],
+  )
+
+  // Bases never move.
+  useEffect(() => {
+    const b = base.current
+    if (b) {
+      lights.forEach((f, i) => b.setMatrixAt(i, tmp.m.makeTranslation(f.x, f.z - 0.07, f.y)))
+      b.instanceMatrix.needsUpdate = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lights, meshes])
+
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
-    const ph = i * 1.37
-    const fan = ((i % 7) - 3) * 0.2
-    let pan: number
-    let tilt: number
-    if (fixed) {
-      pan = THREE.MathUtils.degToRad(f.pan ?? 0)
-      tilt = THREE.MathUtils.degToRad(f.tilt ?? 35)
-    } else if (f.kind === 'par') {
-      // Pars wash back towards the stage.
-      pan = Math.PI + fan * 0.5
-      tilt = 0.45
-    } else if (motion && on) {
-      const speed = f.kind === 'beam' ? 1.1 : 0.55
-      pan = fan + Math.sin(t * speed + ph) * 0.7
-      tilt = 0.55 + Math.sin(t * speed * 0.8 + ph * 1.3) * 0.35
-    } else {
-      pan = fan
-      tilt = 0.6
-    }
-    tmp.d.set(Math.sin(pan) * Math.sin(tilt), -Math.cos(tilt), Math.cos(pan) * Math.sin(tilt)).normalize()
-    tmp.q.setFromUnitVectors(tmp.down, tmp.d)
-    head.current?.quaternion.copy(tmp.q)
-    if (own) tmp.c.copy(own)
-    else paletteColor(palette, i, t, tmp.c)
-    tmp.c.multiplyScalar(level)
-    if (f.kind === 'blinder') {
-      const flash = motion ? Math.pow(Math.max(0, Math.sin(t * 3.3 + ph)), 12) : 0.3
-      lens.current?.color.setRGB(1 + flash * 5, 0.85 + flash * 4, 0.6 + flash * 3)
-      return
-    }
-    lens.current?.color.copy(tmp.c).multiplyScalar(4)
-    mat.uniforms.color.value.copy(tmp.c)
-    const len = Math.min(reach, tmp.d.y < -0.05 ? (f.z - 0.3) / -tmp.d.y : reach)
-    if (beam.current) beam.current.scale.set(Math.max(0.06, len * Math.tan(half)), len, Math.max(0.06, len * Math.tan(half)))
-    if (pool.current) {
-      const hits = tmp.d.y < -0.05 && len < reach - 0.5
-      pool.current.visible = hits
-      if (hits) {
-        const r = Math.max(0.5, len * Math.tan(half) * 1.3)
-        pool.current.position.set(f.x + tmp.d.x * len, 0.04, f.y + tmp.d.z * len)
-        pool.current.scale.set(r * 2, r * 2, 1)
-        poolMat.color.copy(tmp.c).multiplyScalar(f.kind === 'par' ? 0.25 : 0.6)
+    const aim = (f: Fixture, i: number) => {
+      const ph = i * 1.37
+      const fan = ((i % 7) - 3) * 0.2
+      let pan: number
+      let tilt: number
+      if (f.aim === 'fixed') {
+        pan = THREE.MathUtils.degToRad(f.pan ?? 0)
+        tilt = THREE.MathUtils.degToRad(f.tilt ?? 35)
+      } else if (f.kind === 'par') {
+        pan = Math.PI + fan * 0.5
+        tilt = 0.45
+      } else if (motion && on) {
+        const speed = f.kind === 'beam' ? 1.1 : 0.55
+        pan = fan + Math.sin(t * speed + ph) * 0.7
+        tilt = 0.55 + Math.sin(t * speed * 0.8 + ph * 1.3) * 0.35
+      } else {
+        pan = fan
+        tilt = 0.6
       }
+      tmp.d.set(Math.sin(pan) * Math.sin(tilt), -Math.cos(tilt), Math.cos(pan) * Math.sin(tilt)).normalize()
+      tmp.q.setFromUnitVectors(tmp.down, tmp.d)
+    }
+    const colorOf = (f: Fixture, i: number) => {
+      const o = own.get(f.id)
+      if (o) tmp.c.copy(o)
+      else paletteColor(palette, i, t, tmp.c)
+      return tmp.c.multiplyScalar(f.intensity ?? 1)
+    }
+
+    heads.forEach((f, k) => {
+      const i = index.get(f.id)!
+      aim(f, i)
+      tmp.p.set(f.x, f.z - 0.15, f.y)
+      tmp.m.compose(tmp.p, tmp.q, tmp.one).multiply(tmp.m2.makeTranslation(0, -0.18, 0))
+      head.current?.setMatrixAt(k, tmp.m)
+      tmp.m.compose(tmp.p, tmp.q, tmp.one).multiply(tmp.m2.makeTranslation(0, -0.355, 0)).multiply(tmp.lensRot)
+      lens.current?.setMatrixAt(k, tmp.m)
+      const col = colorOf(f, i)
+      lens.current?.setColorAt(k, tmp.c2.copy(col).multiplyScalar(4))
+      if (!on) return
+      const half = f.beam ? THREE.MathUtils.degToRad(f.beam / 2) : HALF_ANGLE[f.kind]
+      const reach = f.reach ?? 45
+      const len = Math.min(reach, tmp.d.y < -0.05 ? (f.z - 0.3) / -tmp.d.y : reach)
+      const r = Math.max(0.06, len * Math.tan(half))
+      const shown = k % beamEvery === 0
+      tmp.m.compose(tmp.p, tmp.q, tmp.one).multiply(tmp.m2.makeTranslation(0, -0.36, 0)).multiply(tmp.m2.makeScale(shown ? r : 0, shown ? len : 0, shown ? r : 0))
+      beam.current?.setMatrixAt(k, tmp.m)
+      const op = (BEAM_OPACITY[f.kind] ?? 0.3) * (0.4 + haze * 1.2) * beamEvery
+      beam.current?.setColorAt(k, tmp.c2.copy(col).multiplyScalar(op))
+      if (tmp.d.y < -0.05 && len < reach - 0.5) {
+        const pr = Math.max(0.5, r * 1.3)
+        tmp.m.compose(tmp.p2.set(f.x + tmp.d.x * len, 0.04, f.y + tmp.d.z * len), tmp.flat, tmp.sc.set(pr * 2, pr * 2, 1))
+        pool.current?.setColorAt(k, tmp.c2.copy(col).multiplyScalar(f.kind === 'par' ? 0.25 : 0.6))
+      } else tmp.m.makeScale(0, 0, 0)
+      pool.current?.setMatrixAt(k, tmp.m)
+    })
+    blinders.forEach((f, k) => {
+      const i = index.get(f.id)!
+      aim(f, i)
+      tmp.p.set(f.x, f.z - 0.15, f.y)
+      tmp.m.compose(tmp.p, tmp.q, tmp.one).multiply(tmp.m2.makeTranslation(0, -0.15, 0))
+      bBody.current?.setMatrixAt(k, tmp.m)
+      tmp.m.compose(tmp.p, tmp.q, tmp.one).multiply(tmp.m2.makeTranslation(0, -0.21, 0)).multiply(tmp.lensRot)
+      bLens.current?.setMatrixAt(k, tmp.m)
+      const flash = motion ? Math.pow(Math.max(0, Math.sin(t * 3.3 + i * 1.37)), 12) : 0.3
+      bLens.current?.setColorAt(k, tmp.c2.setRGB(1 + flash * 5, 0.85 + flash * 4, 0.6 + flash * 3))
+    })
+    for (const r of all) {
+      const im = (r as IRef).current
+      if (!im) continue
+      im.instanceMatrix.needsUpdate = true
+      if (im.instanceColor) im.instanceColor.needsUpdate = true
     }
   })
+
   return (
-    <>
-      <group position={[f.x, f.z - 0.15, f.y]}>
-        {/* Clamp and base */}
-        <mesh position={[0, 0.08, 0]} material={blackMetal}>
-          <boxGeometry args={[0.32, 0.1, 0.24]} />
-        </mesh>
-        <group ref={head}>
-          {f.kind === 'blinder' ? (
-            <>
-              <mesh position={[0, -0.15, 0]} rotation-x={Math.PI / 2} material={blackMetal}>
-                <boxGeometry args={[0.5, 0.5, 0.1]} />
-              </mesh>
-              <mesh position={[0, -0.21, 0]} rotation-x={Math.PI / 2}>
-                <planeGeometry args={[0.42, 0.42]} />
-                <meshBasicMaterial ref={lens} toneMapped={false} side={THREE.DoubleSide} />
-              </mesh>
-            </>
-          ) : (
-            <>
-              <mesh position={[0, -0.18, 0]} material={blackMetal}>
-                <cylinderGeometry args={[0.13, 0.16, 0.34, 16]} />
-              </mesh>
-              <mesh position={[0, -0.355, 0]} rotation-x={Math.PI / 2}>
-                <circleGeometry args={[0.12, 20]} />
-                <meshBasicMaterial ref={lens} toneMapped={false} side={THREE.DoubleSide} />
-              </mesh>
-              {on && <mesh ref={beam} geometry={beamGeom} material={mat} position={[0, -0.36, 0]} />}
-            </>
-          )}
-        </group>
-      </group>
-      {on && f.kind !== 'blinder' && <mesh ref={pool} rotation-x={-Math.PI / 2} material={poolMat} visible={false} renderOrder={2}>
-        <planeGeometry args={[1, 1]} />
-      </mesh>}
-    </>
+    <group>
+      {meshes.base && <primitive object={meshes.base} />}
+      {meshes.head && <primitive object={meshes.head} />}
+      {meshes.lens && <primitive object={meshes.lens} />}
+      {on && meshes.beam && <primitive object={meshes.beam} />}
+      {on && meshes.pool && <primitive object={meshes.pool} />}
+      {meshes.bBody && <primitive object={meshes.bBody} />}
+      {meshes.bLens && <primitive object={meshes.bLens} />}
+    </group>
   )
 }
 

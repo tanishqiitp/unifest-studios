@@ -133,8 +133,9 @@ function skinMat(skin: Skin, color: string): THREE.Material {
 
 // LED material showing the slice of the shared content that falls on this surface.
 // `uvMetres` = the geometry's UVs are in metres (shape geometry) rather than 0..1 (boxes).
-function useLedMat(base: THREE.Texture, span: Span | null, left: number, bottom: number, w: number, h: number, uvMetres: boolean, show: boolean) {
+function useLedMat(enabled: boolean, base: THREE.Texture, span: Span | null, left: number, bottom: number, w: number, h: number, uvMetres: boolean, show: boolean) {
   const mat = useMemo(() => {
+    if (!enabled) return null
     const t = base.clone()
     t.needsUpdate = true
     t.colorSpace = THREE.SRGBColorSpace
@@ -151,8 +152,8 @@ function useLedMat(base: THREE.Texture, span: Span | null, left: number, bottom:
     }
     const g = show ? 1.5 : 1.1
     return new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(g, g, g), toneMapped: false })
-  }, [base, span, left, bottom, w, h, uvMetres, show])
-  useEffect(() => () => (mat.map?.dispose(), mat.dispose()), [mat])
+  }, [enabled, base, span, left, bottom, w, h, uvMetres, show])
+  useEffect(() => () => void (mat?.map?.dispose(), mat?.dispose()), [mat])
   return mat
 }
 
@@ -208,10 +209,12 @@ function Piece({ s, span, content, show, dropAt }: { s: SetPiece; span: Span | n
   const left = s.x - s.w / 2
   const front = s.y + s.d / 2
   const solid = skinMat(s.skin, s.color)
-  const ledBox = useLedMat(base, span, left, s.z, s.w, s.h, false, show)
-  const ledShape = useLedMat(base, span, left, s.z, s.w, s.h, true, show)
+  const open = hasOpening(s.kind)
+  // LED materials only for pieces that show LED: a box face, or a frame/arch/ring face or filling.
+  const ledBox = useLedMat(s.skin === 'led' && !open, base, span, left, s.z, s.w, s.h, false, show)
+  const ledShape = useLedMat(open && (s.skin === 'led' || s.inner === 'led'), base, span, left, s.z, s.w, s.h, true, show)
   const flash = useRef<THREE.MeshBasicMaterial[]>([])
-  flash.current = [ledBox, ledShape]
+  flash.current = [ledBox, ledShape].filter((m): m is THREE.MeshBasicMaterial => !!m)
   // The drop: LED faces flash white for a moment.
   useFrame(({ clock }) => {
     const t = (performance.now() - dropAt) / 1000
@@ -236,7 +239,7 @@ function Piece({ s, span, content, show, dropAt }: { s: SetPiece; span: Span | n
   }, [s])
   useEffect(() => () => (frameGeo?.dispose(), innerGeo?.dispose()), [frameGeo, innerGeo])
 
-  const faceMat = s.skin === 'led' ? (hasOpening(s.kind) ? ledShape : ledBox) : solid
+  const faceMat = (s.skin === 'led' ? (open ? ledShape : ledBox) : null) ?? solid
   const innerMat = s.inner === 'led' ? ledShape : s.inner && s.inner !== 'open' ? skinMat(s.inner as Skin, s.color) : null
 
   let body: React.ReactNode
@@ -249,7 +252,7 @@ function Piece({ s, span, content, show, dropAt }: { s: SetPiece; span: Span | n
     )
   } else if (s.kind === 'pod') {
     body = (
-      <mesh position={[s.x, s.z + s.h / 2, s.y]} material={s.skin === 'led' ? ledBox : solid} castShadow>
+      <mesh position={[s.x, s.z + s.h / 2, s.y]} material={ledBox ?? solid} castShadow>
         <cylinderGeometry args={[s.w / 2, s.w / 2, s.h, 40]} />
       </mesh>
     )
