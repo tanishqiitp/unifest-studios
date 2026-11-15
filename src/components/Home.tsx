@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ThemeToggle } from './ThemeToggle'
 import { ArrowRight, Box, Building2, Users, Cloud, CloudUpload, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2, Sparkles, ClipboardList } from 'lucide-react'
 import { useStore } from '../store'
 import type { Project } from '../types'
@@ -122,6 +123,7 @@ export function Home() {
         </div>
         <div className="flex items-center gap-2">
           <AccountButton />
+          <ThemeToggle />
           <button className="btn" onClick={() => setUI({ venuesOpen: true })}>
             <Building2 size={13} /> <span className="hidden sm:inline">Venues</span>
           </button>

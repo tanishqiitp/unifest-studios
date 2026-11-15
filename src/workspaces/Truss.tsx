@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CadShell } from '../components/CadShell'
 import { Line } from 'react-konva'
 import { nanoid } from 'nanoid'
 import { Anchor, MousePointer2, PenLine, Trash2 } from 'lucide-react'
@@ -105,7 +106,7 @@ export function TrussWorkspace() {
           )}
         </Section>
       </aside>
-      <div className="relative flex-1 min-w-0 bg-[#050505]">
+      <CadShell ws="truss" home="top">
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-10 glass rounded-xl flex gap-1 p-1">
           <button className={`btn h-8 ${ui.tool === 'select' ? 'btn-on' : ''}`} onClick={() => setUI({ tool: 'select' })}>
             <MousePointer2 size={13} /> Select
@@ -152,7 +153,7 @@ export function TrussWorkspace() {
           {draft && <Line points={[draft.x1, draft.y1, draft.x2, draft.y2]} stroke="#fff" strokeWidth={2} dash={[6, 4]} strokeScaleEnabled={false} />}
         </PlanCanvas>
         <div className="absolute left-4 bottom-4 text-[11px] text-mute">Top view · ◆ hoist · square = ground-support tower · labels show kg on each point</div>
-      </div>
+      </CadShell>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {truss && <TrussProps t={truss} />}
         {fixture && <FixtureProps f={fixture} />}

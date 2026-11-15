@@ -42,7 +42,7 @@ export function SeatingWorkspace() {
           </div>
         </Section>
       </aside>
-      <div className="relative flex-1 min-w-0 bg-[#050505]">
+      <div className="relative flex-1 min-w-0 bg-canvas">
         <PlanCanvas bounds={{ x: -2, y: -2, w: project.venue.w + 4, h: project.venue.l + 4 }} grid={{ x: 0, y: 0, w: project.venue.w, h: project.venue.l }} onBackground={() => select(null)}>
           <TopView edit="seating" />
         </PlanCanvas>

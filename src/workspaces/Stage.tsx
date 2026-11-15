@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CadShell } from '../components/CadShell'
 import { nanoid } from 'nanoid'
 import { Trash2 } from 'lucide-react'
 import { useStore } from '../store'
@@ -101,12 +102,12 @@ export function StageWorkspace() {
           </button>
         </Section>
       </aside>
-      <div className="relative flex-1 min-w-0 bg-[#050505]">
+      <CadShell ws="stage" home="top">
         <PlanCanvas bounds={sb ? { x: sb.x - 6, y: sb.y - 3, w: sb.w + 12, h: sb.l + 8 } : { x: -2, y: -2, w: project.venue.w + 4, h: project.venue.l + 4 }} grid={{ x: 0, y: 0, w: project.venue.w, h: project.venue.l }} onBackground={() => select(null)}>
           <TopView edit="stage" />
         </PlanCanvas>
         <div className="absolute left-4 bottom-4 text-[11px] text-mute">Top view · lighter decks are higher · numbers show deck height in m</div>
-      </div>
+      </CadShell>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {deck ? (
           <Section

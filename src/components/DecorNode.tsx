@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { real } from '../lib/theme'
 import { Circle, Group, Rect, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import { useStore } from '../store'
@@ -71,7 +72,7 @@ export function DecorNode({ d, editable }: { d: Decor; editable: boolean }) {
             <Circle radius={Math.max(w, h) / 2} fill="#ffffff" stroke={selected ? '#fff' : '#bbb'} strokeWidth={selected ? 2 : 1} strokeScaleEnabled={false} />
           </>
         ) : (
-          <Rect x={-w / 2} y={-h / 2} width={w} height={h} fill={info.artwork ? '#ffffff30' : d.kind === 'model' ? '#ffffff12' : `${d.color}55`} stroke={selected && editable ? '#fff' : '#9a9a9a'} strokeWidth={selected && editable ? 2 : 1} dash={d.kind === 'model' ? [5, 3] : undefined} strokeScaleEnabled={false} />
+          <Rect x={-w / 2} y={-h / 2} width={w} height={h} fill={info.artwork ? '#ffffff30' : d.kind === 'model' ? '#ffffff12' : real(`${d.color}55`)} stroke={selected && editable ? '#fff' : '#9a9a9a'} strokeWidth={selected && editable ? 2 : 1} dash={d.kind === 'model' ? [5, 3] : undefined} strokeScaleEnabled={false} />
         )}
         {info.artwork && <Rect x={-w / 2} y={h / 2 - 0.02} width={w} height={0.06} fill="#fff" />}
       </Group>

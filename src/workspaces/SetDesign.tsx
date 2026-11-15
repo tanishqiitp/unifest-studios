@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { real } from '../lib/theme'
 import { Arc, Arrow, Circle, Ellipse, Group, Image as KImage, Line, Rect, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import { nanoid } from 'nanoid'
@@ -25,7 +26,7 @@ export const SKIN_FILL: Record<Skin, string> = {
   white: '#e8e8e8',
   paint: '#888888',
 }
-const fillOf = (s: Skin, color: string) => (s === 'paint' || s === 'fabric' || s === 'print' ? color : SKIN_FILL[s])
+const fillOf = (s: Skin, color: string) => real(s === 'paint' || s === 'fabric' || s === 'print' ? color : SKIN_FILL[s])
 
 // CAD-style set designer: front, top and side views plus 3D. Konva's y runs down, so front and side views use y = -height.
 export function SetDesignWorkspace() {
@@ -219,11 +220,11 @@ function SetViews() {
   const pane = (v: Layout, compact: boolean) =>
     v === '3d' ? <SetCad3D compact={compact} /> : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
   return (
-    <div className="relative flex-1 min-w-0 bg-[#050505]">
+    <div className="relative flex-1 min-w-0 bg-canvas">
       {layout === 'quad' ? (
         <div className="absolute left-0 right-16 top-[72px] bottom-16 grid grid-cols-2 grid-rows-2 gap-px bg-line border border-l-0 border-line">
           {(['front', 'top', 'side', '3d'] as Layout[]).map((v) => (
-            <div key={v} className="relative bg-[#050505] min-w-0 min-h-0 overflow-hidden">
+            <div key={v} className="relative bg-canvas min-w-0 min-h-0 overflow-hidden">
               {pane(v, true)}
             </div>
           ))}

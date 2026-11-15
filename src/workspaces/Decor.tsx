@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { CadShell } from '../components/CadShell'
 import { Box, Copy, Flame, Image as ImageIcon, Loader2, Palette, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useStore } from '../store'
 import type { Decor, DecorKind } from '../types'
@@ -96,7 +97,7 @@ export function DecorWorkspace() {
         <BrandKit />
       </aside>
 
-      <div className="relative flex-1 min-w-0 bg-[#050505]">
+      <CadShell ws="decor" home="top">
         <PlanCanvas
           bounds={sb ? { x: sb.x - 12, y: Math.max(-4, sb.y - 6), w: sb.w + 24, h: sb.l + 22 } : { x: -2, y: -2, w: project.venue.w + 4, h: project.venue.l + 4 }}
           grid={{ x: 0, y: 0, w: project.venue.w, h: project.venue.l }}
@@ -105,7 +106,7 @@ export function DecorWorkspace() {
           <TopView edit="decor" />
         </PlanCanvas>
         <div className="absolute left-4 bottom-4 text-[11px] text-mute">Top view · drag to move · handles to resize and rotate · ● effect with its safety ring · see it all in 3D</div>
-      </div>
+      </CadShell>
 
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {item ? (

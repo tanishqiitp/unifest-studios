@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { CadShell } from '../components/CadShell'
 import { Group, Line, Rect, Shape, Text } from 'react-konva'
 import type Konva from 'konva'
 import { nanoid } from 'nanoid'
@@ -62,7 +63,7 @@ export function LedWorkspace() {
   return (
     <div className="flex h-full">
       <LeftPanel project={project} selId={sel?.id} />
-      <div className="relative flex-1 min-w-0 bg-[#050505]">
+      <CadShell ws="led" home="front">
         <PlanCanvas
           apiRef={api}
           bounds={bounds}
@@ -76,7 +77,7 @@ export function LedWorkspace() {
           ))}
         </PlanCanvas>
         {sb == null && project.screens.length > 0 && <div className="absolute left-4 bottom-4 text-[11px] text-mute">Front view. Floor = 0 m. Curved screens are shown unrolled.</div>}
-      </div>
+      </CadShell>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {sel ? (
           <ScreenProps s={sel} />

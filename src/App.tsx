@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { ThemeToggle } from './components/ThemeToggle'
 import { AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Project, Workspace } from './types'
@@ -351,6 +352,7 @@ function TopBar() {
           }}
         />
         <AccountButton />
+        <ThemeToggle />
         {!phone && (
           <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
             <HelpCircle size={14} />
