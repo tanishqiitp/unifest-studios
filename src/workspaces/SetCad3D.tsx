@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { PartsScene } from './Parts3D'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid, OrbitControls, TransformControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -42,6 +43,7 @@ export function SetCad3D({ compact, edit = 'set' }: { compact?: boolean; edit?: 
         <Grid position={[L.cx, 0.001, L.y + 10]} args={[200, 200]} cellSize={1} sectionSize={5} cellColor={light ? '#d6d6d6' : '#1d1d1d'} sectionColor={light ? '#b0b0b0' : '#333333'} fadeDistance={160} infiniteGrid />
         <Things project={project} pick={pick} />
         <SetItems project={project} show={false} dropAt={0} onInfo={() => undefined} onPick={(id) => pick('set', id)} />
+        <PartsScene project={project} />
         {piece && <SetHandle s={piece} mode={mode} />}
         {item && <BoxHandle item={item} />}
         <CamRig cam={cam} cx={L.cx} cy={L.y} />
@@ -166,7 +168,7 @@ function SelBox({ w, h, d }: { w: number; h: number; d: number }) {
 }
 
 // Decks, truss, lights, screens and decor as simple solids (the 3D Visualizer shows the full look).
-function Things({ project, pick }: { project: Project; pick: (k: CadKind, id: string) => void }) {
+export function Things({ project, pick }: { project: Project; pick: (k: CadKind, id: string) => void }) {
   const on = (k: CadKind, id: string) => (e: ThreeEvent<MouseEvent>) => (e.stopPropagation(), pick(k, id))
   return (
     <group>

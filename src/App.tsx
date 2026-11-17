@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
-import { Info, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -32,6 +32,7 @@ import { useDevice, isCompact, type DevicePref } from './lib/device'
 
 // The 3D engine is large, so it loads only when someone opens a 3D view.
 const Viz3DWorkspace = lazy(() => import('./workspaces/Viz3D').then((m) => ({ default: m.Viz3DWorkspace })))
+const ModelWorkspace = lazy(() => import('./workspaces/Model').then((m) => ({ default: m.ModelWorkspace })))
 const Viewer = lazy(() => import('./workspaces/Viz3D').then((m) => ({ default: m.Viewer })))
 
 function Loading3D() {
@@ -51,10 +52,14 @@ const TABS: { id: Workspace; label: string; short: string; kicker: string; icon:
   { id: 'led', label: 'LED Screens', short: 'LED', kicker: '05', icon: MonitorPlay, tip: 'Screen sizes, pixels, cabling and power' },
   { id: 'seating', label: 'Seating', short: 'Seats', kicker: '06', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
   { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '07', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
+  { id: 'model', label: '3D Model', short: 'Model', kicker: '★', icon: Shapes, tip: 'Blender-style 3D modelling: shapes, spin, extrude, arrays, groups, materials' },
   { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '08', icon: Box, tip: 'See everything in 3D, render images and videos' },
   { id: 'plan', label: 'Plan', short: 'Plan', kicker: '09', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
   { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '10', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
 ]
+
+// Number keys 1-9 open these, in order (the Model tab is opened by clicking).
+const KEYED = TABS.filter((t) => t.id !== 'model')
 
 export default function App() {
   const [shared] = useState(() => !!readShareHash() || !!shareCodeFromPath())
@@ -151,12 +156,17 @@ function Studio() {
           </Suspense>
         )}
         {ui.workspace === 'decor' && <DecorWorkspace />}
+        {ui.workspace === 'model' && (
+          <Suspense fallback={<Loading3D />}>
+            <ModelWorkspace />
+          </Suspense>
+        )}
         {ui.workspace === 'set' && <SetDesignWorkspace />}
         {ui.workspace === 'plan' && <PlanWorkspace />}
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
         {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <Hud />}
         {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <ToolRail />}
-        {compact && ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <PanelToggles />}
+        {compact && ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor', 'model'].includes(ui.workspace) && <PanelToggles />}
         <Guide />
       </div>
       <WarningsBar />
@@ -257,7 +267,7 @@ function TopBar() {
         <button
           key={t.id}
           onClick={() => setUI({ workspace: t.id, tool: 'select' })}
-          title={`${t.tip} (${TABS.indexOf(t) + 1})`}
+          title={KEYED.includes(t) ? `${t.tip} (${KEYED.indexOf(t) + 1})` : t.tip}
           className={`h-8 px-2 2xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
         >
           <t.icon size={13} className={ui.workspace === t.id ? '' : 'text-mute'} />
@@ -646,7 +656,7 @@ function useShortcuts() {
       if (k === 'b' && ui.workspace === 'led') setUI({ tool: ui.tool === 'paint' ? 'select' : 'paint' })
       if (k === '?') setUI({ shortcutsOpen: true })
       if (k === 'escape') setUI({ tool: 'select' })
-      if (/^[1-9]$/.test(k) && TABS[Number(k) - 1]) setUI({ workspace: TABS[Number(k) - 1].id, tool: 'select' })
+      if (/^[1-9]$/.test(k) && KEYED[Number(k) - 1]) setUI({ workspace: KEYED[Number(k) - 1].id, tool: 'select' })
       if ((k === 'delete' || k === 'backspace') && ui.selection) {
         const { kind, id } = ui.selection
         mutate((p) => {

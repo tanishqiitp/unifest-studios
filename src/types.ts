@@ -1,7 +1,7 @@
 // All distances are metres, weights kg, power watts.
 // Top view: x runs across the venue, y runs from the back of the stage (0) towards the audience.
 
-export type Workspace = 'ground' | 'stage' | 'set' | 'truss' | 'led' | 'seating' | 'decor' | 'viz' | 'plan' | 'deliver'
+export type Workspace = 'ground' | 'stage' | 'set' | 'truss' | 'led' | 'seating' | 'decor' | 'model' | 'viz' | 'plan' | 'deliver'
 export type Mode = 'simple' | 'pro'
 export type Units = 'm' | 'ft'
 
@@ -317,6 +317,7 @@ export interface Project {
   // Added in v0.3; older projects may not have them.
   decor?: Decor[]
   set?: SetPiece[]
+  parts?: Part[] // free 3D parts from the Model workspace
   setContent?: string // image (data URL) or video link spread across all LED skins
   brand?: Brand
   quote?: QuoteSettings
@@ -328,4 +329,50 @@ export interface Project {
   eventDate?: string // YYYY-MM-DD
   eventDays?: number
   look?: { haze?: number } // 3D atmosphere
+}
+
+// ---------- Model workspace: free 3D parts (Blender-style) ----------
+// Venue axes: x across, y depth (towards the audience), z up. Geometry origin is the bottom centre.
+export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text'
+export type Vec3 = [number, number, number]
+export interface PartMat {
+  color: string
+  metal: number // 0..1
+  rough: number // 0..1
+  glow?: number // emissive strength 0..3, in the part colour
+  opacity?: number // 0.05..1
+  led?: boolean // shows the set LED content
+  map?: string // texture (data URL)
+  wire?: boolean
+}
+export interface PartArray {
+  mode: 'linear' | 'radial'
+  count: number
+  offset: Vec3 // linear: step between copies (x, y, z metres)
+  radius?: number // radial: distance from the centre
+  angle?: number // radial: total sweep in degrees (360 = full circle)
+}
+export interface Part {
+  id: string
+  name: string
+  kind: PartKind
+  parent?: string // id of a group part
+  pos: Vec3 // local to the parent group
+  rot: Vec3 // degrees about x, y, z
+  scl: Vec3
+  w: number // size across
+  d: number // size in depth
+  h: number // size up
+  seg?: number // smoothness of round shapes
+  bevel?: number // rounded edges, metres
+  steps?: number // stairs
+  arc?: number // torus / dome sweep, degrees
+  thick?: number // torus tube thickness, metres
+  profile?: [number, number][] // lathe (radius, height) or extrude (across, up), 0..1 of the size
+  text?: string
+  mat: PartMat
+  array?: PartArray
+  mirror?: boolean // live copy across the venue centre line (top-level parts)
+  hidden?: boolean
+  locked?: boolean
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { PartsScene } from './Parts3D'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, PerformanceMonitor, Sky, Stars } from '@react-three/drei'
 import { useDevice } from '../lib/device'
@@ -645,6 +646,7 @@ function Scene(props: SceneProps) {
       <Fixtures project={project} look={look} palette={palette} motion={motion} quality={quality} />
       <PerformanceMonitor onDecline={props.onSlow} flipflops={2} />
       <SetItems project={project} show={show} dropAt={dropAt} onInfo={onInfo} />
+      <PartsScene project={project} shadows={quality === 'best'} />
       <DecorItems project={project} show={show} motion={motion} dropAt={dropAt} onInfo={onInfo} />
       <DropFlash dropAt={dropAt} />
       {labels && <Labels project={project} look={look} />}

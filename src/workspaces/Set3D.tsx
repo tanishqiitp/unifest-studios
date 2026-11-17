@@ -33,7 +33,7 @@ export function SetItems({ project, show, dropAt, onInfo, onPick }: { project: P
 }
 
 // One image or video shared by every LED surface.
-function useSetContent(src?: string) {
+export function useSetContent(src?: string) {
   const [tex, setTex] = useState<THREE.Texture | null>(null)
   useEffect(() => {
     if (!src) return setTex(null)

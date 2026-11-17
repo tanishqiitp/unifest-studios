@@ -276,6 +276,7 @@ export function liteProject(p: Project, images = false): Project {
     // Imported models live only in the designer's browser, so clients don't get them.
     decor: (p.decor ?? []).filter((d) => d.kind !== 'model').map((d, i) => ({ ...d, id: `x${i}`, image: images ? d.image : undefined })),
     set: (p.set ?? []).map((s) => ({ ...s, image: images ? s.image : undefined })),
+    parts: p.parts?.length ? p.parts.map((x) => ({ ...x, mat: { ...x.mat, map: images ? x.mat.map : undefined } })) : undefined,
     setContent: images || !p.setContent?.startsWith('data:') ? p.setContent : undefined,
     brand: p.brand ? { ...p.brand, logo: images ? p.brand.logo : undefined } : undefined,
     quote: undefined,

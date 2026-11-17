@@ -1,0 +1,283 @@
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import type { ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import type { Part, PartMat, Project, Vec3 } from '../types'
+import { childrenOf } from '../lib/parts'
+import { useSetContent } from './Set3D'
+
+// Venue (x across, y depth, z up) to three.js (x, y up, z depth). Rotations are relabelled the same way.
+export const toThree = (v: Vec3): [number, number, number] => [v[0], v[2], v[1]]
+export const rotToThree = (r: Vec3): [number, number, number] => [THREE.MathUtils.degToRad(r[0]), THREE.MathUtils.degToRad(r[2]), THREE.MathUtils.degToRad(r[1])]
+export const fromThree = (v: THREE.Vector3): Vec3 => [v.x, v.z, v.y]
+export const rotFromThree = (e: THREE.Euler): Vec3 => [THREE.MathUtils.radToDeg(e.x), THREE.MathUtils.radToDeg(e.z), THREE.MathUtils.radToDeg(e.y)]
+
+export type Shading = 'solid' | 'material' | 'wire' | 'xray'
+
+// ---------- geometry (origin at the bottom centre; x across, y up, z depth) ----------
+
+export function partGeometry(p: Part): THREE.BufferGeometry | null {
+  const { w, h, d } = p
+  const seg = Math.max(3, Math.round(p.seg ?? 32))
+  let g: THREE.BufferGeometry
+  switch (p.kind) {
+    case 'group':
+      return null
+    case 'box':
+      g = p.bevel && p.bevel > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(p.bevel, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d)
+      g.translate(0, h / 2, 0)
+      return g
+    case 'cylinder':
+      g = new THREE.CylinderGeometry(w / 2, w / 2, h, seg)
+      g.scale(1, 1, d / Math.max(w, 0.001))
+      g.translate(0, h / 2, 0)
+      return g
+    case 'cone':
+      g = new THREE.ConeGeometry(w / 2, h, seg)
+      g.scale(1, 1, d / Math.max(w, 0.001))
+      g.translate(0, h / 2, 0)
+      return g
+    case 'sphere':
+      g = new THREE.SphereGeometry(0.5, seg, Math.max(4, Math.round(seg / 2)))
+      g.scale(w, h, d)
+      g.translate(0, h / 2, 0)
+      return g
+    case 'dome':
+      g = new THREE.SphereGeometry(0.5, seg, Math.max(4, Math.round(seg / 2)), 0, Math.PI * 2, 0, (Math.PI / 2) * Math.min(1, (p.arc ?? 180) / 180))
+      g.scale(w, h * 2, d)
+      return g
+    case 'torus': {
+      const t = Math.max(0.01, p.thick ?? 0.25)
+      g = new THREE.TorusGeometry(Math.max(0.02, w / 2 - t), t, 16, Math.max(24, seg * 2), THREE.MathUtils.degToRad(Math.max(1, Math.min(360, p.arc ?? 360))))
+      g.scale(1, h / Math.max(w, 0.001), 1)
+      g.translate(0, h / 2, 0)
+      return g
+    }
+    case 'plane':
+      g = new THREE.PlaneGeometry(w, d)
+      g.rotateX(-Math.PI / 2)
+      g.translate(0, h, 0)
+      return g
+    case 'text':
+      g = new THREE.PlaneGeometry(w, h)
+      g.translate(0, h / 2, 0)
+      return g
+    case 'stairs': {
+      const n = Math.max(1, Math.round(p.steps ?? 6))
+      const rise = h / n
+      const run = d / n
+      // Lowest step at the front (towards the audience), highest at the back.
+      const steps = Array.from({ length: n }, (_, i) => {
+        const b = new THREE.BoxGeometry(w, rise * (i + 1), run)
+        b.translate(0, (rise * (i + 1)) / 2, d / 2 - run * (i + 0.5))
+        return b
+      })
+      g = mergeGeometries(steps) ?? new THREE.BoxGeometry(w, h, d)
+      steps.forEach((s) => s.dispose())
+      return g
+    }
+    case 'ramp': {
+      const s = new THREE.Shape([new THREE.Vector2(-d / 2, 0), new THREE.Vector2(d / 2, 0), new THREE.Vector2(-d / 2, h)])
+      g = new THREE.ExtrudeGeometry(s, { depth: w, bevelEnabled: false })
+      g.rotateY(-Math.PI / 2)
+      g.translate(w / 2, 0, 0)
+      return g
+    }
+    case 'lathe': {
+      const pts = (p.profile ?? []).map(([u, v]) => new THREE.Vector2(Math.max(0, u) * (w / 2), v * h))
+      if (pts.length < 2) return null
+      g = new THREE.LatheGeometry(pts, seg)
+      g.scale(1, 1, d / Math.max(w, 0.001))
+      return g
+    }
+    case 'extrude': {
+      const pts = (p.profile ?? []).map(([u, v]) => new THREE.Vector2((u - 0.5) * w, v * h))
+      if (pts.length < 3) return null
+      const bev = Math.max(0, p.bevel ?? 0)
+      g = new THREE.ExtrudeGeometry(new THREE.Shape(pts), { depth: d, bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev, bevelSegments: 2, curveSegments: 12 })
+      g.translate(0, 0, -d / 2)
+      return g
+    }
+  }
+}
+
+// ---------- materials ----------
+
+function textTexture(text: string, w: number, h: number) {
+  const c = document.createElement('canvas')
+  const ar = Math.max(0.1, w / Math.max(h, 0.01))
+  c.height = 256
+  c.width = Math.min(4096, Math.round(256 * ar))
+  const g = c.getContext('2d')!
+  g.fillStyle = '#fff'
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  let size = 200
+  g.font = `800 ${size}px Inter, system-ui, sans-serif`
+  while (size > 20 && g.measureText(text).width > c.width * 0.95) g.font = `800 ${(size -= 8)}px Inter, system-ui, sans-serif`
+  g.fillText(text, c.width / 2, c.height / 2 + 8)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
+function useMap(src?: string) {
+  const [t, setT] = useState<THREE.Texture | null>(null)
+  useEffect(() => {
+    if (!src) return setT(null)
+    const tex = new THREE.TextureLoader().load(src)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+    setT(tex)
+    return () => tex.dispose()
+  }, [src])
+  return t
+}
+
+function usePartMaterial(p: Part, shading: Shading, led: THREE.Texture | null, mirrored: boolean) {
+  const m: PartMat = p.mat
+  const map = useMap(m.map)
+  const text = useMemo(() => (p.kind === 'text' ? textTexture(p.text || ' ', p.w, p.h) : null), [p.kind, p.text, p.w, p.h])
+  useEffect(() => () => text?.dispose(), [text])
+  const mat = useMemo(() => {
+    const solid = shading === 'solid'
+    const tex = solid ? null : m.led ? led : map
+    const mt = new THREE.MeshStandardMaterial({
+      color: m.led && !solid ? '#ffffff' : m.color,
+      metalness: solid ? 0 : m.metal,
+      roughness: solid ? 0.7 : m.rough,
+      map: text ?? tex ?? null,
+      alphaMap: null,
+      emissive: m.led && !solid ? '#ffffff' : m.color,
+      emissiveMap: (m.led && !solid ? led : null) ?? (text && !solid ? text : null),
+      emissiveIntensity: solid ? 0 : m.led ? 1.1 : (m.glow ?? 0),
+      transparent: shading === 'xray' || (m.opacity ?? 1) < 1 || !!text,
+      opacity: shading === 'xray' ? 0.35 : (m.opacity ?? 1),
+      alphaTest: text ? 0.4 : 0,
+      wireframe: shading === 'wire' || !!m.wire,
+      side: mirrored || p.kind === 'plane' || p.kind === 'text' || p.kind === 'lathe' || (p.kind === 'torus' && (p.arc ?? 360) < 360) ? THREE.DoubleSide : THREE.FrontSide,
+      depthWrite: shading !== 'xray',
+    })
+    if (text) mt.color.set(m.color)
+    return mt
+  }, [m.color, m.metal, m.rough, m.glow, m.opacity, m.led, m.wire, shading, led, map, text, mirrored, p.kind, p.arc])
+  useEffect(() => () => mat.dispose(), [mat])
+  return mat
+}
+
+// ---------- scene ----------
+
+interface Ctx {
+  all: Part[]
+  shading: Shading
+  led: THREE.Texture | null
+  onPick?: (id: string, e: ThreeEvent<MouseEvent>) => void
+  register?: (id: string, o: THREE.Object3D | null) => void
+  selected?: Set<string>
+  shadows: boolean
+}
+const PartsCtx = createContext<Ctx | null>(null)
+
+export function PartsScene({
+  project,
+  shading = 'material',
+  onPick,
+  register,
+  selected,
+  shadows = false,
+}: {
+  project: Project
+  shading?: Shading
+  onPick?: Ctx['onPick']
+  register?: Ctx['register']
+  selected?: Set<string>
+  shadows?: boolean
+}) {
+  const all = project.parts ?? []
+  const led = useSetContent(all.some((p) => p.mat.led) ? project.setContent : undefined)
+  const ctx = useMemo<Ctx>(() => ({ all, shading, led, onPick, register, selected, shadows }), [all, shading, led, onPick, register, selected, shadows])
+  if (!all.length) return null
+  const roots = childrenOf(all, undefined)
+  const cx = project.venue.w / 2
+  return (
+    <PartsCtx.Provider value={ctx}>
+      {roots.map((p) => (
+        <group key={p.id}>
+          <PartNode p={p} root />
+          {p.mirror && !p.hidden && (
+            <group position={[2 * cx, 0, 0]} scale={[-1, 1, 1]}>
+              <PartNode p={p} mirrored />
+            </group>
+          )}
+        </group>
+      ))}
+    </PartsCtx.Provider>
+  )
+}
+
+function instances(p: Part): { pos: [number, number, number]; rotY: number }[] {
+  const a = p.array
+  if (!a || a.count <= 1) return [{ pos: [0, 0, 0], rotY: 0 }]
+  const n = Math.min(200, Math.max(1, Math.round(a.count)))
+  if (a.mode === 'radial') {
+    const sweep = THREE.MathUtils.degToRad(a.angle ?? 360)
+    const step = Math.abs(sweep - Math.PI * 2) < 1e-3 ? sweep / n : sweep / Math.max(1, n - 1)
+    return Array.from({ length: n }, (_, i) => ({ pos: [0, 0, 0], rotY: i * step }))
+  }
+  return Array.from({ length: n }, (_, i) => ({ pos: toThree([a.offset[0] * i, a.offset[1] * i, a.offset[2] * i]), rotY: 0 }))
+}
+
+function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: boolean }) {
+  const ctx = useContext(PartsCtx)!
+  const geo = useMemo(() => partGeometry(p), [p])
+  useEffect(() => () => geo?.dispose(), [geo])
+  const mat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
+  const kids = childrenOf(ctx.all, p.id)
+  if (p.hidden) return null
+  const radius = p.array?.mode === 'radial' ? (p.array.radius ?? 2) : 0
+  const sel = !mirrored && ctx.selected?.has(p.id)
+  return (
+    <group
+      ref={mirrored || !ctx.register ? undefined : (o) => ctx.register!(p.id, o)}
+      position={toThree(p.pos)}
+      rotation={rotToThree(p.rot)}
+      scale={toThree(p.scl)}
+      userData={{ partId: p.id, root }}
+    >
+      {instances(p).map((ins, i) => (
+        <group key={i} position={ins.pos} rotation-y={ins.rotY}>
+          <group position={[0, 0, radius]}>
+            {geo && (
+              <mesh
+                geometry={geo}
+                material={mat}
+                castShadow={ctx.shadows}
+                receiveShadow={ctx.shadows}
+                onClick={
+                  ctx.onPick
+                    ? (e) => {
+                        e.stopPropagation()
+                        ctx.onPick!(p.id, e)
+                      }
+                    : undefined
+                }
+              />
+            )}
+            {sel && geo && i === 0 && <SelOutline geo={geo} />}
+            {kids.map((k) => (
+              <PartNode key={k.id} p={k} mirrored={mirrored} />
+            ))}
+          </group>
+        </group>
+      ))}
+    </group>
+  )
+}
+
+const outlineMat = new THREE.LineBasicMaterial({ color: '#ff9a1f', depthTest: false, transparent: true, opacity: 0.9 })
+function SelOutline({ geo }: { geo: THREE.BufferGeometry }) {
+  const edges = useMemo(() => new THREE.EdgesGeometry(geo, 25), [geo])
+  useEffect(() => () => edges.dispose(), [edges])
+  return <lineSegments geometry={edges} material={outlineMat} renderOrder={10} />
+}

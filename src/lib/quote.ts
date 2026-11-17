@@ -1,4 +1,5 @@
 import { hasOpening, setLedArea } from './setpieces'
+import { partArea } from './parts'
 import { jsPDF } from 'jspdf'
 import { autoTable } from 'jspdf-autotable'
 import type { Decor, DecorKind, Project, QuoteSettings } from '../types'
@@ -77,6 +78,13 @@ export function setRows(p: Project): EquipRow[] {
     else if (s.kind === 'cutout') add('Set', 'Printed cut-out (per m²)', s.w * s.h, 'm²', s.w * s.h * 6, 0)
     else if (s.skin !== 'led' || hasOpening(s.kind)) add('Set', `Fabricated set, ${s.skin} finish (per m²)`, front, 'm²', front * 18, 0)
     if (s.outline) add('Set', s.outline.style === 'bulb' ? 'Bulb outline (per m)' : 'Neon outline (per m)', 2 * (s.w + s.h), 'm', 0, 2 * (s.w + s.h) * (s.outline.style === 'bulb' ? 40 : 15))
+  }
+  // Parts from the Model workspace: priced on their surface; LED and glowing parts draw power.
+  for (const part of p.parts ?? []) {
+    const a = partArea(part)
+    if (!a) continue
+    if (part.mat.led) add('Set', 'Set LED (per m²)', a / 2, 'm²', (a / 2) * 30, (a / 2) * 250)
+    else add('Set', 'Custom 3D fabrication (per m² of surface)', a, 'm²', a * 12, part.mat.glow ? a * 20 : 0)
   }
   return rows
 }
