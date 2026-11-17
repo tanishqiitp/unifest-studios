@@ -1,3 +1,4 @@
+import { instances } from './partArrays'
 import { nanoid } from 'nanoid'
 import type { Part, PartKind, PartMat, Project, Vec3 } from '../types'
 import { setLine } from './setpieces'
@@ -153,7 +154,9 @@ export function partArea(p: Part) {
   const d = p.d * sy
   const h = p.h * sz
   const a = p.kind === 'plane' || p.kind === 'text' ? w * h : 2 * (w * h + w * d + h * d)
-  return a * copies(p)
+  // Growing copies are taller, so count each copy by its height factor.
+  const grown = p.array && p.array.count > 1 && p.array.grow ? instances(p).reduce((t, i) => t + i.sy, 0) / Math.max(1, instances(p).length) : 1
+  return a * copies(p) * grown
 }
 
 // ---------- ready-made assemblies ----------
@@ -169,6 +172,17 @@ export const ASSEMBLIES: { id: AssemblyId; name: string; blurb: string }[] = [
   { id: 'dome-pavilion', name: 'Dome pavilion', blurb: 'Dome on six columns: mandap or VIP' },
 ]
 
+// A slim arch frame: legs `t` wide (fraction of the width), straight to 70% of the height, then a curved top.
+export function slimArch(t: number): [number, number][] {
+  const n = 12
+  const arc = (r: number, ry: number, from: number, to: number) =>
+    Array.from({ length: n + 1 }, (_, i) => {
+      const a = from + ((to - from) * i) / n
+      return [0.5 + Math.cos(a) * r, 0.7 + Math.sin(a) * ry] as [number, number]
+    })
+  return [[0, 0], ...arc(0.5, 0.3, Math.PI, 0), [1, 0], [1 - t, 0], ...arc(0.5 - t, Math.max(0.02, 0.3 - t * 0.6), 0, Math.PI), [t, 0]]
+}
+
 export function buildAssembly(p: Project, id: AssemblyId): Part[] {
   const L = setLine(p)
   const at: Vec3 = [L.cx, L.front + 3, 0]
@@ -177,27 +191,49 @@ export function buildAssembly(p: Project, id: AssemblyId): Part[] {
   const gold = MAT_PRESETS.Gold
   let kids: Part[] = []
   if (id === 'festival') {
-    // A tree: select the whole stage, one wing, or one panel. Every size stays editable.
-    g.pos = [L.cx, L.front - 6, 0]
+    // A tree you can select whole, by part (centre, a wing) or by single panel. It sizes itself to the
+    // existing stage (or brings its own platform), and every size stays editable.
+    const hasStage = p.decks.length > 0
+    const half = hasStage ? Math.max(4, L.w / 2) : 17
+    const top = hasStage ? L.deckH : 1.5
+    const back = hasStage ? L.y - 0.4 : L.front - 10
+    g.pos = [L.cx, back + 1, 0]
     const sub = (name: string, pos: Vec3) => newPart('group', pos, { parent: g.id, name })
-    const platform = kid('box', [0, 0, 0], { name: 'Platform', w: 24, d: 10, h: 1.5, mat: MAT_PRESETS['Matte black'] })
-    const centre = sub('Centre structure', [0, -3.5, 1.5])
+    const ledW = Math.min(10, Math.max(4, half * 0.6))
+    const ledH = +(ledW * 0.56).toFixed(2)
+    const centre = sub('Centre structure', [0, 0, top])
     const inC = (kind: PartKind, pos: Vec3, extra: Partial<Part>) => newPart(kind, pos, { parent: centre.id, ...extra })
-    const centreKids = [
-      inC('box', [0, -0.6, 0], { name: 'Main LED', w: 10, d: 0.2, h: 5.6, mat: MAT_PRESETS['LED content'] }),
-      ...[0, 1, 2].map((i) => inC('extrude', [0, 0.4 - i * 0.5, 0], { name: `Arch ${i + 1}`, w: 12 + i * 2.5, d: 0.35, h: 7.5 + i * 1.2, profile: EXTRUDE_PRESETS.Arch, bevel: 0.04, mat: i === 0 ? MAT_PRESETS['Neon glow'] : MAT_PRESETS['Brushed steel'] })),
-    ]
-    const wing = (side: 1 | -1) => {
-      const w = sub(side < 0 ? 'Left wing' : 'Right wing', [side * 9.5, -3.5, 1.5])
+    // Three nested arch frames, growing towards the audience like a tunnel; each opening clears the LED.
+    const arches = [0, 1, 2].map((i) => {
+      const w = +(ledW + 2 + i * 2.5).toFixed(2)
+      return inC('extrude', [0, 0.35 + i * 0.5, 0], { name: `Arch ${i + 1}`, w, d: 0.3, h: +(ledH * 1.35 + i * 1.2).toFixed(2), profile: slimArch(0.4 / w), bevel: 0.03, mat: i === 0 ? MAT_PRESETS['Neon glow'] : MAT_PRESETS['Brushed steel'] })
+    })
+    kids = [centre, inC('box', [0, 0, 0], { name: 'Main LED', w: ledW, d: 0.2, h: ledH, mat: MAT_PRESETS['LED content'] }), ...arches]
+    if (!hasStage) kids.unshift(kid('box', [0, 4, 0], { name: 'Platform', w: half * 2, d: 10, h: top, mat: MAT_PRESETS['Matte black'] }))
+    // Wings: side LED next to the arches, then fins rising towards the outside. On a stage too narrow for them,
+    // the wings stand on the ground just beside the stage instead.
+    const inStage = (ledW + 7) / 2 + 0.3
+    const fitsOn = half - 0.3 - inStage >= 2.5
+    const inner = fitsOn ? inStage : Math.max(inStage, half + 0.5)
+    const span = fitsOn ? half - 0.3 - inner : 7
+    const wingZ = fitsOn ? top : 0
+    const sideW = +Math.min(4, span * 0.55).toFixed(2)
+    const fins = Math.max(2, Math.floor((span - sideW - 0.4) / 0.7) + 1)
+    const wingH = +(ledH * 0.65 + (fitsOn ? 0 : top)).toFixed(2)
+    for (const side of [-1, 1] as const) {
+      const w = sub(side < 0 ? 'Left wing' : 'Right wing', [side * inner, 0.3, wingZ])
       const inW = (kind: PartKind, pos: Vec3, extra: Partial<Part>) => newPart(kind, pos, { parent: w.id, ...extra })
-      return [
+      kids.push(
         w,
-        inW('box', [0, -0.3, 0], { name: 'Side LED', w: 4, d: 0.2, h: 3.5, mat: MAT_PRESETS['LED content'] }),
-        inW('box', [side * -1.8, 0.3, 0], { name: 'Fins', w: 0.25, d: 0.8, h: 3.2, taper: 0.15, mat: MAT_PRESETS['Brushed steel'], array: { mode: 'linear', count: 6, offset: [side * 0.75, 0, 0], grow: 0.12 } }),
-      ]
+        inW('box', [(side * sideW) / 2, 0, fitsOn ? 0 : top], { name: 'Side LED', w: sideW, d: 0.2, h: +(ledH * 0.65).toFixed(2), mat: MAT_PRESETS['LED content'] }),
+        ...(fitsOn ? [] : [inW('box', [(side * sideW) / 2, 0, 0], { name: 'LED base', w: sideW, d: 0.6, h: top, mat: MAT_PRESETS['Matte black'] })]),
+        inW('box', [side * (sideW + 0.4), 0, 0], { name: 'Fins', w: 0.25, d: 0.8, h: +(wingH * 0.9).toFixed(2), taper: 0.15, mat: MAT_PRESETS['Brushed steel'], array: { mode: 'linear', count: fins, offset: [side * 0.7, 0, 0], grow: 0.12 } }),
+      )
     }
-    const towers = [-1, 1].map((sd) => kid('box', [sd * 13.5, -4.5, 0], { name: sd < 0 ? 'Left tower' : 'Right tower', w: 1.6, d: 1.6, h: 13, taper: 0.45, rot: [0, sd * -4, 0], mat: MAT_PRESETS['Brushed steel'] }))
-    kids = [platform, centre, ...centreKids, ...wing(-1), ...wing(1), ...towers]
+    const outer = inner + sideW + 0.4 + (fins - 1) * 0.7
+    // Angled towers just outside the stage, on the ground, leaning in.
+    const towerH = +(top + ledH * 1.35 + 4).toFixed(1)
+    for (const sd of [-1, 1]) kids.push(kid('box', [sd * Math.max(half + 1, outer + 1.4), 0.5, 0], { name: sd < 0 ? 'Left tower' : 'Right tower', w: 1.4, d: 1.4, h: towerH, taper: 0.45, rot: [0, sd * 4, 0], mat: MAT_PRESETS['Brushed steel'] }))
   } else if (id === 'staircase') {
     const h = Math.max(0.6, L.deckH || 1.2)
     g.pos = [L.cx, L.front, 0]

@@ -63,7 +63,15 @@ describe('festival stage builder', () => {
     const parts = buildAssembly(generateProject(TEMPLATES[0]), 'festival')
     const root = parts.find((x) => !x.parent)!
     const names = childrenOf(parts, root.id).map((x) => x.name)
-    expect(names).toEqual(expect.arrayContaining(['Platform', 'Centre structure', 'Left wing', 'Right wing', 'Left tower', 'Right tower']))
+    expect(names).toEqual(expect.arrayContaining(['Centre structure', 'Left wing', 'Right wing', 'Left tower', 'Right tower']))
+    // It uses the existing stage instead of adding a second platform on top of it.
+    expect(names).not.toContain('Platform')
+    const empty = buildAssembly({ ...generateProject(TEMPLATES[0]), decks: [] }, 'festival')
+    expect(empty.some((x) => x.name === 'Platform')).toBe(true)
+    // The main LED fits inside the smallest arch opening (legs 0.4 m each side).
+    const led = parts.find((x) => x.name === 'Main LED')!
+    const arch1 = parts.find((x) => x.name === 'Arch 1')!
+    expect(arch1.w - 0.8).toBeGreaterThan(led.w)
     const centre = parts.find((x) => x.name === 'Centre structure')!
     expect(childrenOf(parts, centre.id).filter((x) => /Arch/.test(x.name))).toHaveLength(3)
   })
