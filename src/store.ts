@@ -149,18 +149,29 @@ export const useStore = create<State>()(
   ),
 )
 
-// Consecutive changes from the same focused form control within 1.5 s merge into one undo step.
+// One undo step per gesture: consecutive changes from the same focused form control within 1.5 s, or all
+// changes made while one mouse/finger press is held (dragging a handle in an editor), merge into one.
 let lastControl: Element | null = null
 let lastAt = 0
+let press = 0 // increases on every press
+let pressHeld = false
+let lastPress = -1
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', () => ((press += 1), (pressHeld = true)), true)
+  window.addEventListener('pointerup', () => (pressHeld = false), true)
+  window.addEventListener('pointercancel', () => (pressHeld = false), true)
+}
 function mergeWithLast() {
   if (typeof document === 'undefined') return false
   const el = document.activeElement
   const now = Date.now()
   const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
-  const merge = field && el === lastControl && now - lastAt < 1500
+  const sameField = field && el === lastControl && now - lastAt < 1500
+  const samePress = pressHeld && press === lastPress
   lastControl = field ? el : null
+  lastPress = pressHeld ? press : -1
   lastAt = now
-  return merge
+  return sameField || samePress
 }
 
 // After undo/redo, drop a selection whose item no longer exists.

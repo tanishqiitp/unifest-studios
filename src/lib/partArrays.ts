@@ -4,9 +4,15 @@ import type { Part } from '../types'
 const rad = (d: number) => (d * Math.PI) / 180
 const toThree = (v: [number, number, number]): [number, number, number] => [v[0], v[2], v[1]]
 
-type Ins = { pos: [number, number, number]; rotY: number; sy: number; flip: boolean; alt: boolean }
-export function instances(p: Part): Ins[] {
+export type Ins = { pos: [number, number, number]; rotY: number; rotZ?: number; sy: number; flip: boolean; alt: boolean }
+type Along = (count: number) => { pos: [number, number, number]; rotY: number; rotZ: number }[]
+/** `along` places copies on the parent curve (array mode 'path'). */
+export function instances(p: Part, along?: Along): Ins[] {
   const a = p.array
+  if (a && a.mode === 'path' && along && a.count >= 1) {
+    const g = a.grow ?? 0
+    return along(a.count).map((c, i) => ({ ...c, sy: Math.max(0.05, 1 + g * i), flip: false, alt: i % 2 === 1 }))
+  }
   if (!a || a.count <= 1) return [{ pos: [0, 0, 0], rotY: 0, sy: 1, flip: false, alt: false }]
   const n = Math.min(200, Math.max(1, Math.round(a.count)))
   const turn = rad(a.turn ?? 0)

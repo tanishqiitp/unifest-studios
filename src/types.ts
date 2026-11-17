@@ -338,8 +338,14 @@ export interface Project {
 
 // ---------- Model workspace: free 3D parts (Blender-style) ----------
 // Venue axes: x across, y depth (towards the audience), z up. Geometry origin is the bottom centre.
-export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text'
+export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text' | 'sculpt' | 'path' | 'drape'
 export type Vec3 = [number, number, number]
+export interface Cutouts {
+  shape: 'circle' | 'square' | 'arch' | 'diamond'
+  cols: number
+  rows: number
+  size: number // 0.1..0.95 of each cell
+}
 export interface PartMat {
   color: string
   metal: number // 0..1
@@ -351,7 +357,7 @@ export interface PartMat {
   wire?: boolean
 }
 export interface PartArray {
-  mode: 'linear' | 'radial'
+  mode: 'linear' | 'radial' | 'path' | 'surface' // path: along the parent curve; surface: scattered over the parent
   count: number
   offset: Vec3 // linear: step between copies (x, y, z metres)
   radius?: number // radial: distance from the centre
@@ -384,6 +390,17 @@ export interface Part {
   bend?: number // degrees the width curls into an arc (180 = a standing arch)
   organic?: number // 0..1: smooth sculpted bumps over the surface
   seed?: number // changes the organic pattern
+  base?: 'sphere' | 'panel' | 'block' // sculpt: starting shape
+  res?: 'low' | 'medium' | 'high' // sculpt: point density
+  sculpt?: string // sculpt: packed positions (see lib/sculpt.ts)
+  holes?: Cutouts // openings cut through a box or extruded shape
+  plane?: 'front' | 'top' // curve: drawn in the side view (up/across) or the top view (floor plan)
+  closed?: boolean // curve: loops back to the start
+  form?: 'tube' | 'ribbon' | 'guide' // curve: what is built along it
+  swags?: number // drape: scallops along the top (0 = straight curtain)
+  sag?: number // drape: how deep the swags dip, 0..0.9 of the drop
+  cage?: { front?: number[]; side?: number[] } // cage deform handles (see lib/cage.ts)
+  solid?: boolean // text: extruded 3D letters instead of a flat sign
   mat: PartMat
   array?: PartArray
   mirror?: boolean // live copy across the venue centre line (top-level parts)

@@ -1,4 +1,8 @@
 import { StudioEnv } from './StudioEnv'
+import { CURVE_PRESETS } from '../lib/curves'
+import { fontState, subscribeFont } from '../lib/text3d'
+import { CAGE_PRESETS, EMPTY_CAGE, hasCage } from '../lib/cage'
+import { BRUSHES, SculptSession, useSculpt } from './Sculpt'
 import { useGlCreated } from '../components/Safe3D'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
@@ -463,7 +467,70 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
           <Download size={13} />
           <span className="hidden xl:inline">.glb</span>
         </button>
+        <RenderButton name={name} />
       </div>
+    </div>
+  )
+}
+
+// Live handles to the 3D view for one-off jobs started from the toolbar (still renders).
+const view: { gl?: THREE.WebGLRenderer; scene?: THREE.Scene; camera?: THREE.PerspectiveCamera; invalidate?: () => void } = {}
+function ViewBridge() {
+  const { gl, scene, camera, invalidate } = useThree()
+  useEffect(() => {
+    Object.assign(view, { gl, scene, camera: camera as THREE.PerspectiveCamera, invalidate })
+    return () => void Object.assign(view, { gl: undefined, scene: undefined, camera: undefined })
+  }, [gl, scene, camera, invalidate])
+  return null
+}
+
+function RenderButton({ name }: { name: string }) {
+  const [open, setOpen] = useState(false)
+  const [progress, setProgress] = useState<number | null>(null)
+  const { notify } = useStore.getState()
+  const go = async (w: number, h: number, passes: number) => {
+    setOpen(false)
+    if (!view.gl || !view.scene || !view.camera || progress !== null) return
+    setProgress(0)
+    try {
+      const { renderStill } = await import('../lib/renderStill')
+      const blob = await renderStill(view.gl, view.scene, view.camera, { width: w, height: h, passes, onProgress: setProgress })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${(name || 'unifest-model').replace(/[^\w-]+/g, '-')}-render-${w}x${h}.png`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 3000)
+      notify(`Render saved: ${w} × ${h} PNG with soft shadows`)
+    } catch {
+      notify('Could not render: this device ran out of graphics memory. Try the HD size.')
+    } finally {
+      setProgress(null)
+      view.invalidate?.()
+    }
+  }
+  return (
+    <div className="relative">
+      <button className="btn h-8 px-2 text-[11px]" title="High-quality still image from this camera, with soft shadows" onClick={() => setOpen(!open)} disabled={progress !== null} aria-expanded={open}>
+        <ImageIcon size={13} />
+        <span className="hidden xl:inline">{progress === null ? 'Render' : `Rendering ${Math.round(progress * 100)}%`}</span>
+        {progress !== null && <span className="xl:hidden mono">{Math.round(progress * 100)}%</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-10 z-30 card p-1 w-56 fade-in" onMouseLeave={() => setOpen(false)}>
+          {(
+            [
+              ['HD still', '1920 × 1080 · quick', 1920, 1080, 16],
+              ['4K still', '3840 × 2160 · for print and slides', 3840, 2160, 10],
+              ['Square post', '1080 × 1080 · social media', 1080, 1080, 16],
+            ] as const
+          ).map(([t, sub, w, h, n]) => (
+            <button key={t} className="w-full text-left px-3 py-2 rounded-md hover:bg-lift" onClick={() => go(w, h, n)}>
+              <div className="text-xs font-medium">{t}</div>
+              <div className="text-[10px] text-mute">{sub}</div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -534,7 +601,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
           <shadowMaterial opacity={0.25} />
         </mesh>
       )}
-      <Grid position={[L.cx, 0.001, L.front]} args={[300, 300]} cellSize={1} sectionSize={5} cellColor={light ? '#d0d0d0' : '#1d1d1d'} sectionColor={light ? '#a8a8a8' : '#353535'} fadeDistance={180} infiniteGrid />
+      <Grid userData={{ helper: true }} position={[L.cx, 0.001, L.front]} args={[300, 300]} cellSize={1} sectionSize={5} cellColor={light ? '#d0d0d0' : '#1d1d1d'} sectionColor={light ? '#a8a8a8' : '#353535'} fadeDistance={180} infiniteGrid />
       {m.context && (
         <group>
           <Things project={project} pick={() => undefined} />
@@ -545,6 +612,8 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
         <PartsScene project={project} shading={m.shading} onPick={pick} register={register} selected={selSet} shadows={shadows} />
       </group>
       <Gizmo />
+      <ViewBridge />
+      <SculptSession part={all.find((p) => p.id === m.sel[m.sel.length - 1])} objs={m.objs} />
       {import.meta.env.DEV && <DevHook />}
       <CamRig cx={L.cx} cy={L.front} />
       <GizmoHelper alignment="bottom-right" margin={[80, 120]}>
@@ -603,7 +672,8 @@ function Gizmo() {
   const part = all.find((p) => p.id === active)
   const obj = active ? objs[active] : undefined
   const start = useRef<Map<string, { p: THREE.Vector3; r: THREE.Euler; s: THREE.Vector3 }>>(new Map())
-  if (!part || !obj || part.locked || !obj.parent) return null
+  const sculpting = useSculpt((s) => s.on)
+  if (!part || !obj || part.locked || !obj.parent || (sculpting && part.kind === 'sculpt')) return null
   const snapshot = () => {
     start.current = new Map(sel.filter((id) => objs[id]).map((id) => [id, { p: objs[id].position.clone(), r: objs[id].rotation.clone(), s: objs[id].scale.clone() }]))
   }
@@ -747,7 +817,10 @@ function Props({ p }: { p: Part }) {
         </div>
       </Section>
 
-      {!isGroup && (
+      {p.kind === 'sculpt' && <SculptPanel p={p} />}
+      {p.kind === 'path' && <CurvePanel p={p} />}
+
+      {!isGroup && p.kind !== 'sculpt' && p.kind !== 'path' && (
         <Section title="Shape">
           <div className="grid grid-cols-3 gap-2">
             <Num label="Width" value={p.w} onChange={(w) => up({ w: Math.max(0.01, w) })} unit="m" step={0.1} />
@@ -758,6 +831,13 @@ function Props({ p }: { p: Part }) {
             <Num label="Smoothness (sides)" value={p.seg ?? 32} onChange={(seg) => up({ seg: Math.round(Math.max(3, Math.min(128, seg))) })} step={1} int tip="3 = triangle, 4 = square, 6 = hexagon, 32+ = round." />
           )}
           {(p.kind === 'box' || p.kind === 'extrude') && <Num label="Bevel (rounded edges)" value={p.bevel ?? 0} onChange={(bevel) => up({ bevel: Math.max(0, bevel) })} unit="m" step={0.01} />}
+          {p.kind === 'drape' && (
+            <div className="grid grid-cols-3 gap-2">
+              <Num label="Folds" value={p.steps ?? 14} onChange={(steps) => up({ steps: Math.round(Math.max(1, Math.min(80, steps))) })} step={1} int tip="Number of pleats across. Depth sets how deep they are." />
+              <Num label="Swags" value={p.swags ?? 0} onChange={(swags) => up({ swags: Math.round(Math.max(0, Math.min(20, swags))) })} step={1} int tip="Scallops along the top: 0 is a straight curtain." />
+              <Num label="Swag dip" value={Math.round((p.sag ?? 0.25) * 100)} onChange={(sg) => up({ sag: Math.max(0, Math.min(90, sg)) / 100 })} unit="%" step={5} />
+            </div>
+          )}
           {p.kind === 'stairs' && <Num label="Steps" value={p.steps ?? 6} onChange={(steps) => up({ steps: Math.round(Math.max(1, Math.min(60, steps))) })} step={1} int />}
           {(p.kind === 'torus' || p.kind === 'dome') && <Num label="Sweep" value={p.arc ?? (p.kind === 'dome' ? 180 : 360)} onChange={(arc) => up({ arc: Math.max(1, Math.min(p.kind === 'dome' ? 180 : 360, arc)) })} unit="°" step={15} tip="Less than full makes an arch or partial dome." />}
           {p.kind === 'torus' && <Num label="Tube thickness" value={p.thick ?? 0.25} onChange={(thick) => up({ thick: Math.max(0.01, thick) })} unit="m" step={0.05} />}
@@ -767,7 +847,33 @@ function Props({ p }: { p: Part }) {
               <input className="field mt-1" value={p.text ?? ''} maxLength={60} onChange={(e) => up({ text: e.target.value })} />
             </label>
           )}
+          {p.kind === 'text' && <Text3dToggle p={p} />}
           {(p.kind === 'lathe' || p.kind === 'extrude') && <ProfileEditor p={p} />}
+          {p.kind !== 'plane' && p.kind !== 'text' && <CageEditor p={p} />}
+          {(p.kind === 'box' || p.kind === 'extrude') && (
+            <>
+              <Sel
+                label="Cut-outs"
+                value={p.holes?.shape ?? 'none'}
+                onChange={(v) => up({ holes: v === 'none' ? undefined : { cols: 3, rows: 2, size: 0.6, ...p.holes, shape: v as NonNullable<Part['holes']>['shape'] } })}
+                options={[
+                  { value: 'none', label: 'None' },
+                  { value: 'square', label: 'Windows' },
+                  { value: 'arch', label: 'Arched openings' },
+                  { value: 'circle', label: 'Portholes' },
+                  { value: 'diamond', label: 'Diamond lattice' },
+                ]}
+                tip="Cut openings through the shape. Any opening that would cross the edge is left out, so it stays solid."
+              />
+              {p.holes && (
+                <div className="grid grid-cols-3 gap-2">
+                  <Num label="Across" value={p.holes.cols} onChange={(cols) => up({ holes: { ...p.holes!, cols: Math.round(Math.max(1, Math.min(30, cols))) } })} step={1} int />
+                  <Num label="Up" value={p.holes.rows} onChange={(rows) => up({ holes: { ...p.holes!, rows: Math.round(Math.max(1, Math.min(30, rows))) } })} step={1} int />
+                  <Num label="Size" value={Math.round(p.holes.size * 100)} onChange={(sz) => up({ holes: { ...p.holes!, size: Math.max(10, Math.min(95, sz)) / 100 } })} unit="%" step={5} />
+                </div>
+              )}
+            </>
+          )}
           {p.kind !== 'plane' && p.kind !== 'text' && (
             <div className="grid grid-cols-2 gap-2">
               <Num label="Taper (top size)" value={p.taper ?? 1} onChange={(taper) => up({ taper: Math.max(0, Math.min(3, taper)) })} step={0.05} tip="1 = straight sides, 0.5 = half as wide at the top (angled towers), 0 = a point." />
@@ -852,15 +958,18 @@ function Props({ p }: { p: Part }) {
             { value: 'none', label: 'None' },
             { value: 'linear', label: 'In a row' },
             { value: 'radial', label: 'In a circle' },
+            ...(parts().find((x) => x.id === p.parent)?.kind === 'path' ? [{ value: 'path', label: 'Along its curve' }] : []),
+            ...(parts().some((x) => x.id === p.parent && x.kind !== 'group' && x.kind !== 'path') ? [{ value: 'surface', label: 'Scattered over its parent' }] : []),
           ]}
           tip="Repeat this part (and everything in a group): rows of columns, circles of bulbs, staircases of lights."
         />
         {p.array && p.array.count > 1 && (
           <>
-            <Num label="Copies" value={p.array.count} onChange={(count) => up({ array: { ...p.array!, count: Math.round(Math.max(2, Math.min(200, count))) } })} step={1} int />
+            <Num label="Copies" value={p.array.count} onChange={(count) => up({ array: { ...p.array!, count: Math.round(Math.max(2, Math.min(p.array!.mode === 'surface' ? 1500 : 200, count))) } })} step={1} int />
+            {p.array.mode === 'surface' && <Num label="Pattern" value={p.seed ?? 1} onChange={(seed) => up({ seed: Math.round(seed) })} step={1} int tip="Try other numbers for a different arrangement." />}
             <div className="grid grid-cols-2 gap-2">
-              <Num label="Grow each copy" value={Math.round((p.array.grow ?? 0) * 100)} onChange={(g) => up({ array: { ...p.array!, grow: Math.max(-90, Math.min(200, g)) / 100 } })} unit="%" step={5} tip="Each copy is taller (or shorter) than the last: fins that rise towards the outside." />
-              <Num label="Turn each copy" value={p.array.turn ?? 0} onChange={(turn) => up({ array: { ...p.array!, turn } })} unit="°" step={5} />
+              <Num label={p.array.mode === 'surface' ? 'Size variation' : 'Grow each copy'} value={Math.round((p.array.grow ?? 0) * 100)} onChange={(g) => up({ array: { ...p.array!, grow: Math.max(-90, Math.min(200, g)) / 100 } })} unit="%" step={5} tip="Each copy is taller (or shorter) than the last: fins that rise towards the outside." />
+              <Num label={p.array.mode === 'surface' ? 'Random turn' : 'Turn each copy'} value={p.array.turn ?? 0} onChange={(turn) => up({ array: { ...p.array!, turn } })} unit="°" step={5} />
             </div>
             {p.array.mode === 'linear' && <Check label="Both ways, mirrored (symmetric)" checked={!!p.array.symmetric} onChange={(symmetric) => up({ array: { ...p.array!, symmetric } })} tip="Copies spread out on both sides of the original, the far side mirrored." />}
             <label className="flex items-center gap-2 text-[11px]">
@@ -868,7 +977,7 @@ function Props({ p }: { p: Part }) {
               Alternate colour
               {p.array.alt && <input type="color" value={p.array.alt} onChange={(e) => up({ array: { ...p.array!, alt: e.target.value } })} className="h-6 w-8 bg-transparent" aria-label="Alternate colour" />}
             </label>
-            {p.array.mode === 'linear' ? (
+            {p.array.mode === 'path' || p.array.mode === 'surface' ? null : p.array.mode === 'linear' ? (
               <Vec label="Step between copies" unit="m" v={p.array.offset} step={0.25} onChange={(i, n) => up({ array: { ...p.array!, offset: p.array!.offset.map((x, j) => (j === i ? n : x)) as Vec3 } })} />
             ) : (
               <div className="grid grid-cols-2 gap-2">
@@ -877,6 +986,19 @@ function Props({ p }: { p: Part }) {
               </div>
             )}
           </>
+        )}
+        {p.kind !== 'group' && p.kind !== 'path' && (
+          <button
+            className="btn w-full justify-center text-[11px]"
+            title="Adds small flowers you can swap for any shape; they cover this part's surface"
+            onClick={() => {
+              const f = newPart('sphere', [0, 0, 0], { parent: p.id, name: 'Scattered flowers', w: 0.25, d: 0.25, h: 0.2, organic: 0.3, mat: { color: '#f4a6c8', metal: 0, rough: 0.8 }, array: { mode: 'surface', count: 150, offset: [0, 0, 0], grow: 0.35, turn: 360 } })
+              editParts((ps) => [...ps, f])
+              useModel.getState().set({ sel: [f.id] })
+            }}
+          >
+            Scatter flowers on this surface
+          </button>
         )}
         {!p.parent && <Check label="Mirror across the stage centre" checked={!!p.mirror} onChange={(mirror) => up({ mirror })} tip="A live copy on the other side that follows every change." />}
         <div className="grid grid-cols-2 gap-1">
@@ -928,6 +1050,9 @@ function Slider({ label, value, onChange, min = 0, max = 1 }: { label: string; v
 function ProfileEditor({ p }: { p: Part }) {
   const pts = p.profile ?? []
   const lathe = p.kind === 'lathe'
+  const curve = p.kind === 'path'
+  // Open line: spin profiles and curves that don't loop.
+  const open = lathe || (curve && !p.closed)
   const S = 200
   const pad = 10
   const toPx = ([u, v]: [number, number]) => [pad + u * (S - 2 * pad), S - pad - v * (S - 2 * pad)]
@@ -939,10 +1064,10 @@ function ProfileEditor({ p }: { p: Part }) {
     const r = svg.current!.getBoundingClientRect()
     return [((e.clientX - r.left) / r.width) * S, ((e.clientY - r.top) / r.height) * S]
   }
-  const presets = lathe ? LATHE_PRESETS : EXTRUDE_PRESETS
+  const presets = lathe ? LATHE_PRESETS : curve ? CURVE_PRESETS : EXTRUDE_PRESETS
   return (
     <div className="space-y-2">
-      <Sel label={lathe ? 'Profile' : 'Outline'} value="" onChange={(k) => k && set(presets[k])} options={[{ value: '', label: 'Pick a preset…' }, ...Object.keys(presets).map((k) => ({ value: k, label: k }))]} />
+      <Sel label={lathe ? 'Profile' : curve ? 'Curve shape' : 'Outline'} value="" onChange={(k) => k && set(presets[k])} options={[{ value: '', label: 'Pick a preset…' }, ...Object.keys(presets).map((k) => ({ value: k, label: k }))]} />
       <svg
         ref={svg}
         viewBox={`0 0 ${S} ${S}`}
@@ -963,7 +1088,7 @@ function ProfileEditor({ p }: { p: Part }) {
           // Insert the new point on the nearest segment.
           let best = 0
           let bd = Infinity
-          const n = lathe ? pts.length - 1 : pts.length
+          const n = open ? pts.length - 1 : pts.length
           for (let i = 0; i < n; i++) {
             const [ax, ay] = toPx(pts[i])
             const [bx, by] = toPx(pts[(i + 1) % pts.length])
@@ -983,7 +1108,7 @@ function ProfileEditor({ p }: { p: Part }) {
           </g>
         ))}
         {lathe && <line x1={pad} y1={0} x2={pad} y2={S} stroke="#e5484d" strokeDasharray="3 3" strokeWidth={1} />}
-        <polyline points={[...pts, ...(lathe ? [] : pts.slice(0, 1))].map((q) => toPx(q).join(',')).join(' ')} fill={lathe ? 'none' : 'currentColor'} fillOpacity={0.12} stroke="currentColor" strokeWidth={1.5} className="text-fg" />
+        <polyline points={[...pts, ...(open ? [] : pts.slice(0, 1))].map((q) => toPx(q).join(',')).join(' ')} fill={open || curve ? 'none' : 'currentColor'} fillOpacity={0.12} stroke="currentColor" strokeWidth={1.5} className="text-fg" />
         {pts.map((q, i) => {
           const [x, y] = toPx(q)
           return (
@@ -1008,6 +1133,235 @@ function ProfileEditor({ p }: { p: Part }) {
         })}
       </svg>
       <p className="text-[10px] text-mute">{lathe ? 'The red line is the spin axis. ' : ''}Drag points · click a line to add a point · double-click a point to remove it.</p>
+    </div>
+  )
+}
+
+// Brush sculpting controls for a "Sculpt clay" part.
+function SculptPanel({ p }: { p: Part }) {
+  const sc = useSculpt()
+  const up = (patch: Partial<Part>) => updatePart(p.id, patch)
+  const restart = (patch: Partial<Part>) => {
+    if (p.sculpt && !confirm('This starts the sculpt again from the plain shape. Your current sculpting is lost (Ctrl+Z brings it back). Continue?')) return
+    up({ ...patch, sculpt: undefined })
+  }
+  return (
+    <Section title="Sculpt">
+      <button className={`btn w-full justify-center h-9 ${sc.on ? 'btn-on' : ''}`} onClick={() => sc.set({ on: !sc.on })} aria-pressed={sc.on}>
+        {sc.on ? 'Sculpt mode on: brush the shape' : 'Turn on Sculpt mode'}
+      </button>
+      <div className="grid grid-cols-3 gap-1">
+        {BRUSHES.map((b) => (
+          <button key={b.id} className={`btn h-8 text-[11px] justify-center ${sc.brush === b.id ? 'btn-on' : ''}`} title={b.tip} onClick={() => sc.set({ brush: b.id, on: true })}>
+            {b.name}
+          </button>
+        ))}
+      </div>
+      <Slider label={`Radius ${sc.radius.toFixed(2)} m  ([ and ])`} value={sc.radius} min={0.05} max={Math.max(1, Math.max(p.w, p.h, p.d) * 0.6)} onChange={(radius) => sc.set({ radius })} />
+      <Slider label={`Strength ${Math.round(sc.strength * 100)}%`} value={sc.strength} onChange={(strength) => sc.set({ strength })} />
+      <Check label="Mirror left and right" checked={sc.sym} onChange={(sym) => sc.set({ sym })} tip="Every stroke is repeated on the other side of the part." />
+      <p className="text-[10px] text-mute leading-relaxed">Drag on the shape to sculpt. Ctrl inverts (carve, shrink, spread); Shift smooths. Drag off the shape to orbit. Each stroke is one undo step.</p>
+      <div className="grid grid-cols-2 gap-2">
+        <Sel
+          label="Start from"
+          value={p.base ?? 'sphere'}
+          onChange={(v) => restart({ base: v as Part['base'] })}
+          options={[
+            { value: 'sphere', label: 'Ball' },
+            { value: 'block', label: 'Block' },
+            { value: 'panel', label: 'Relief panel' },
+          ]}
+        />
+        <Sel
+          label="Detail"
+          value={p.res ?? 'medium'}
+          onChange={(v) => restart({ res: v as Part['res'] })}
+          options={[
+            { value: 'low', label: 'Low (fastest)' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+          ]}
+          tip="More detail allows finer strokes but is heavier. Medium suits most laptops."
+        />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <Num label="Width" value={p.w} onChange={(w) => up({ w: Math.max(0.05, w) })} unit="m" step={0.1} />
+        <Num label="Depth" value={p.d} onChange={(d) => up({ d: Math.max(0.05, d) })} unit="m" step={0.1} />
+        <Num label="Height" value={p.h} onChange={(h) => up({ h: Math.max(0.05, h) })} unit="m" step={0.1} />
+      </div>
+      {p.sculpt && (
+        <button className="btn w-full justify-center text-[11px]" onClick={() => confirm('Reset the sculpt to the plain shape? (Ctrl+Z undoes this.)') && up({ sculpt: undefined })}>
+          Reset shape
+        </button>
+      )}
+    </Section>
+  )
+}
+
+// A curve: what is built along it, which view it is drawn in, and its points.
+function CurvePanel({ p }: { p: Part }) {
+  const up = (patch: Partial<Part>) => updatePart(p.id, patch)
+  const repeat = () => {
+    const fin = newPart('box', [0, 0, 0], { parent: p.id, name: 'Along the curve', w: 0.2, d: 0.6, h: 1.2, taper: 0.3, mat: MAT_PRESETS['Brushed steel'], array: { mode: 'path', count: 12, offset: [0, 0, 0] } })
+    editParts((ps) => [...ps, fin])
+    useModel.getState().set({ sel: [fin.id] })
+  }
+  return (
+    <Section title="Curve">
+      <div className="grid grid-cols-2 gap-2">
+        <Sel
+          label="Build"
+          value={p.form ?? 'tube'}
+          onChange={(v) => up({ form: v as Part['form'] })}
+          options={[
+            { value: 'tube', label: 'Tube (pipe, neon)' },
+            { value: 'ribbon', label: 'Ribbon / wall' },
+            { value: 'guide', label: 'Guide only' },
+          ]}
+          tip="A ribbon drawn in the top view stands up as a curved wall as tall as the Height."
+        />
+        <Sel
+          label="Drawn in"
+          value={p.plane ?? 'front'}
+          onChange={(v) => up({ plane: v as Part['plane'] })}
+          options={[
+            { value: 'front', label: 'Side view (up)' },
+            { value: 'top', label: 'Top view (floor)' },
+          ]}
+        />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <Num label="Width" value={p.w} onChange={(w) => up({ w: Math.max(0.1, w) })} unit="m" step={0.5} />
+        <Num label={p.plane === 'top' ? 'Depth' : 'Height'} value={p.plane === 'top' ? p.d : p.h} onChange={(v) => up(p.plane === 'top' ? { d: Math.max(0.1, v) } : { h: Math.max(0.1, v) })} unit="m" step={0.5} />
+        <Num label={p.form === 'ribbon' ? 'Thickness' : 'Tube radius'} value={p.thick ?? 0.12} onChange={(thick) => up({ thick: Math.max(0.01, thick) })} unit="m" step={0.02} />
+      </div>
+      {p.form === 'ribbon' && <Num label={p.plane === 'top' ? 'Wall height' : 'Ribbon width'} value={p.plane === 'top' ? p.h : p.d} onChange={(v) => up(p.plane === 'top' ? { h: Math.max(0.05, v) } : { d: Math.max(0.05, v) })} unit="m" step={0.1} />}
+      <Check label="Closed loop" checked={!!p.closed} onChange={(closed) => up({ closed })} />
+      <ProfileEditor p={p} />
+      <p className="text-[10px] text-mute">Drag points to shape the curve, click the line to add a point, double-click a point to remove it.</p>
+      <button className="btn w-full justify-center text-[11px]" onClick={repeat}>
+        Repeat a part along this curve
+      </button>
+    </Section>
+  )
+}
+
+// Cage deform: drag the 3×3 handles in the front or side view to bend the whole shape smoothly.
+function CageEditor({ p }: { p: Part }) {
+  const [view, setView] = useState<'front' | 'side'>('front')
+  const [open, setOpen] = useState(hasCage(p.cage))
+  const [drag, setDrag] = useState<number | null>(null)
+  const svg = useRef<SVGSVGElement>(null)
+  const grid = p.cage?.[view] ?? EMPTY_CAGE
+  const S = 180
+  const pad = 40
+  const inner = S - pad * 2
+  const set = (g: number[] | undefined, v = view) => {
+    const next = { ...p.cage, [v]: g && g.some((x) => Math.abs(x) > 1e-4) ? g : undefined }
+    updatePart(p.id, { cage: next.front || next.side ? next : undefined })
+  }
+  // Handle i at column i % 3, row floor(i / 3) from the bottom.
+  const at = (i: number): [number, number] => [pad + ((i % 3) / 2 + grid[i * 2]) * inner, S - pad - (Math.floor(i / 3) / 2 + grid[i * 2 + 1]) * inner]
+  const local = (e: React.PointerEvent) => {
+    const r = svg.current!.getBoundingClientRect()
+    return [((e.clientX - r.left) / r.width) * S, ((e.clientY - r.top) / r.height) * S]
+  }
+  if (!open)
+    return (
+      <button className="btn w-full justify-center text-[11px]" onClick={() => setOpen(true)} title="Bend the whole shape with a 3×3 grid of handles">
+        Cage deform…
+      </button>
+    )
+  const lines: [number, number][] = [[0, 1], [1, 2], [3, 4], [4, 5], [6, 7], [7, 8], [0, 3], [3, 6], [1, 4], [4, 7], [2, 5], [5, 8]]
+  return (
+    <div className="space-y-2 rounded-lg border border-line p-2">
+      <div className="flex items-center gap-1">
+        <span className="label flex-1">Cage deform</span>
+        {(['front', 'side'] as const).map((v) => (
+          <button key={v} className={`btn h-6 px-2 text-[10px] ${view === v ? 'btn-on' : ''}`} onClick={() => setView(v)}>
+            {v === 'front' ? 'Front' : 'Side'}
+          </button>
+        ))}
+      </div>
+      <Sel
+        label="Preset"
+        value=""
+        onChange={(k) => {
+          const pr = k ? CAGE_PRESETS[k] : null
+          if (pr) updatePart(p.id, { cage: { front: pr.front, side: pr.side } })
+        }}
+        options={[{ value: '', label: 'Pick a shape…' }, ...Object.keys(CAGE_PRESETS).map((k) => ({ value: k, label: k }))]}
+      />
+      <svg
+        ref={svg}
+        viewBox={`0 0 ${S} ${S}`}
+        className="w-full aspect-square rounded-md bg-ink touch-none"
+        role="img"
+        aria-label={`Cage handles, ${view} view`}
+        onPointerMove={(e) => {
+          if (drag === null) return
+          const [x, y] = local(e)
+          const g = [...grid]
+          g[drag * 2] = Math.round(Math.max(-0.6, Math.min(0.6, (x - pad) / inner - (drag % 3) / 2)) * 100) / 100
+          g[drag * 2 + 1] = Math.round(Math.max(-0.6, Math.min(0.6, (S - pad - y) / inner - Math.floor(drag / 3) / 2)) * 100) / 100
+          set(g)
+        }}
+        onPointerUp={() => setDrag(null)}
+      >
+        <rect x={pad} y={pad} width={inner} height={inner} fill="none" stroke="currentColor" className="text-line" strokeDasharray="3 3" />
+        {lines.map(([a, b]) => {
+          const [x1, y1] = at(a)
+          const [x2, y2] = at(b)
+          return <line key={`${a}-${b}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" className="text-dim" strokeWidth={1} />
+        })}
+        {Array.from({ length: 9 }, (_, i) => {
+          const [x, y] = at(i)
+          return (
+            <circle
+              key={i}
+              cx={x}
+              cy={y}
+              r={6}
+              className="fill-ink stroke-current text-fg cursor-grab"
+              strokeWidth={1.5}
+              onPointerDown={(e) => {
+                ;(e.target as Element).setPointerCapture?.(e.pointerId)
+                setDrag(i)
+              }}
+              onDoubleClick={() => {
+                const g = [...grid]
+                g[i * 2] = 0
+                g[i * 2 + 1] = 0
+                set(g)
+              }}
+            />
+          )
+        })}
+        <text x={S / 2} y={S - 8} textAnchor="middle" className="fill-current text-mute" fontSize={9}>
+          {view === 'front' ? 'across →' : 'depth →'}
+        </text>
+      </svg>
+      <div className="flex gap-1">
+        <button className="btn flex-1 justify-center text-[11px]" onClick={() => set(undefined)}>
+          Reset {view}
+        </button>
+        <button className="btn flex-1 justify-center text-[11px]" onClick={() => (updatePart(p.id, { cage: undefined }), setOpen(false))}>
+          Remove cage
+        </button>
+      </div>
+      <p className="text-[10px] text-mute">Drag a handle to bend the shape; double-click a handle to put it back.</p>
+    </div>
+  )
+}
+
+function Text3dToggle({ p }: { p: Part }) {
+  const st = useSyncExternalStore(subscribeFont, fontState)
+  return (
+    <div className="space-y-1">
+      <Check label="3D letters (extruded)" checked={!!p.solid} onChange={(solid) => updatePart(p.id, { solid, d: solid && p.d < 0.15 ? 0.3 : p.d })} tip="Solid letters with depth, for stage-front signs and logos. Depth sets how thick they are." />
+      {p.solid && st === 'loading' && <p className="text-[10px] text-mute">Loading the 3D font…</p>}
+      {p.solid && st === 'failed' && <p className="text-[10px] text-warn">The 3D font could not load (offline?). The sign shows flat for now.</p>}
+      {p.solid && <Num label="Rounded edges" value={p.bevel ?? 0} onChange={(bevel) => updatePart(p.id, { bevel: Math.max(0, Math.min(1, bevel)) })} step={1} int tip="0 = sharp, 1 = rounded letter edges." />}
     </div>
   )
 }

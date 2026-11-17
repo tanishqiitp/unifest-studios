@@ -1,3 +1,4 @@
+import { CURVE_PRESETS } from './curves'
 import { instances } from './partArrays'
 import { nanoid } from 'nanoid'
 import type { Part, PartKind, PartMat, Project, Vec3 } from '../types'
@@ -17,6 +18,9 @@ export const PART_KINDS: Record<Exclude<PartKind, 'group'>, { name: string; size
   text: { name: 'Text sign', size: [6, 0.1, 1.5], group: 'Stage', tip: 'Glowing or painted lettering: event names, sponsor words.' },
   lathe: { name: 'Spin (lathe)', size: [2, 2, 4], group: 'Advanced', tip: 'Draw a side profile and spin it: columns, vases, chandeliers, goblets.' },
   extrude: { name: 'Extrude shape', size: [4, 0.4, 4], group: 'Advanced', tip: 'Draw any outline and push it into a solid: stars, arches, logos, cut panels.' },
+  drape: { name: 'Drape / swag', size: [6, 0.4, 4], group: 'Stage', tip: 'Fabric with pleats and optional swags along the top: stage curtains, backdrops, mandap and ceiling drapes.' },
+  path: { name: 'Curve', size: [8, 3, 4], group: 'Advanced', tip: 'A smooth line through points you place: tubes, neon lines, flowing ribbons, curved walls, or a guide to repeat parts along.' },
+  sculpt: { name: 'Sculpt clay', size: [3, 3, 3], group: 'Advanced', tip: 'Shape it with brushes like clay: draw, inflate, smooth, grab, flatten, pinch. Select it and turn on Sculpt mode.' },
 }
 
 // Profiles: [u, v] with u = radius (lathe) or across (extrude) and v = up, both 0..1.
@@ -83,6 +87,8 @@ export function newPart(kind: PartKind, pos: Vec3, extra: Partial<Part> = {}): P
     profile: kind === 'lathe' ? LATHE_PRESETS.Column : kind === 'extrude' ? EXTRUDE_PRESETS.Star : undefined,
     text: kind === 'text' ? 'UNIFEST' : undefined,
     mat: kind === 'text' ? { color: '#ffffff', metal: 0, rough: 0.5, glow: 1.5 } : { color: '#d9d9d9', metal: 0, rough: 0.6 },
+    ...(kind === 'drape' ? { steps: 14, swags: 0, sag: 0.25, mat: MAT_PRESETS.Velvet } : {}),
+    ...(kind === 'path' ? { profile: CURVE_PRESETS.Arch, plane: 'front' as const, form: 'tube' as const, thick: 0.12 } : {}),
     ...extra,
   }
 }
