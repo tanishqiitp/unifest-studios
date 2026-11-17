@@ -8,7 +8,12 @@ const KEY = 'unifest:guides-hidden'
 const GUIDES: Partial<Record<Workspace, { title: string; steps: string[]; next?: [Workspace, string] }>> = {
   model: {
     title: 'Model in 3D',
-    steps: ['Add a shape or a ready-made piece (left). Click it, then drag the arrows: G moves, R rotates, S scales, X/Y/Z locks an axis.', 'Spin a profile into columns and chandeliers, or extrude an outline into portals and logos. Use Array to repeat parts in rows or circles.', 'Group with Ctrl+G, duplicate with Shift+D, and export a .glb for Blender any time.'],
+    steps: [
+      'Add a shape or a ready-made piece (left). Click it, then drag the arrows: G moves, R rotates, S scales, X/Y/Z locks an axis.',
+      'Shape it in the panel on the right: taper, twist, bend, cage deform, cut-outs, or Sculpt clay with brushes (turn on Sculpt mode).',
+      'Curves make tubes, ribbons and curved walls; repeat parts along a curve or scatter flowers over any surface.',
+      'Save camera views, render a high-quality still, and export a .glb for Blender any time.',
+    ],
     next: ['viz', 'See it in the 3D Visualizer'],
   },
   ground: {
