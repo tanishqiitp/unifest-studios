@@ -1,3 +1,4 @@
+import { ContextBar } from './components/ContextBar'
 import { deleteSelection, duplicateSelection, nudgeSelection, selectAll } from './lib/actions'
 import { SavePoints } from './components/SavePoints'
 import { exportProject } from './lib/export/files'
@@ -181,7 +182,7 @@ function Studio() {
         {ui.workspace === 'plan' && <PlanWorkspace />}
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
         </ErrorBoundary>
-        {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <Hud />}
+        {EDIT_WS.includes(ui.workspace) && <TopStrip />}
         {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <ToolRail />}
         {compact && ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor', 'model'].includes(ui.workspace) && <PanelToggles />}
         <Guide />
@@ -415,6 +416,19 @@ function MenuItem({ icon, label, hint, onClick }: { icon: React.ReactNode; label
   )
 }
 
+// Top of the canvas: project numbers, then actions for the selection and scene suggestions beside them.
+function TopStrip() {
+  const ws = useStore((s) => s.ui.workspace)
+  const device = useDevice((s) => s.kind)
+  const left = device !== 'desktop' ? 'left-3' : 'left-[272px]'
+  return (
+    <div className={`absolute top-4 ${left} right-4 z-20 flex flex-wrap items-start gap-2 pointer-events-none`} data-ws={ws}>
+      <Hud />
+      <ContextBar />
+    </div>
+  )
+}
+
 function Hud() {
   const project = useStore((s) => s.project)
   const t = totals(project)
@@ -429,13 +443,11 @@ function Hud() {
     ['Space est.', t.capacityStatus === 'ok' ? `~${t.capacity.toLocaleString('en-IN')}` : t.capacityStatus === 'check' ? 'unverified' : '—', true],
     ...(project.tables.length ? ([['Seats', seatCount(project).toLocaleString('en-IN')]] as [string, string][]) : []),
   ]
-  const ws = useStore((s) => s.ui.workspace)
   const device = useDevice((s) => s.kind)
-  const left = device !== 'desktop' ? 'left-3' : ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' || ws === 'decor' || ws === 'set' ? 'left-[272px]' : 'left-4'
   // Phones show the three most useful numbers only.
   const shown = device === 'phone' ? items.filter(([k]) => k === 'Total pixels' || k === 'Weight' || k === 'Power max') : items
   return (
-    <div className={`absolute top-4 ${left} z-10 glass rounded-xl flex divide-x divide-line pointer-events-none`}>
+    <div className="glass rounded-xl flex divide-x divide-line pointer-events-none shrink-0">
       {shown.map(([k, v, wide]) => (
         <div key={k} className={`${device === 'phone' ? 'px-2 py-1' : 'px-3 py-1.5'} ${wide && device === 'desktop' ? 'hidden 2xl:block' : ''}`}>
           <div className="text-[9px] tracking-widest uppercase text-mute font-semibold">{k}</div>
@@ -514,21 +526,38 @@ function WarningsBar() {
         <div className="absolute bottom-10 left-0 right-0 z-30 max-h-72 overflow-y-auto border-t border-line bg-panel fade-in">
           {w.length === 0 && <div className="px-5 py-4 text-xs text-dim">No issues found. Your plan passes every automatic check.</div>}
           {w.map((x, i) => (
-            <button
-              key={i}
-              className="w-full flex items-start gap-3 px-5 py-2.5 border-b border-line text-left hover:bg-raised"
-              onClick={() => {
-                setUI({ workspace: x.workspace, warningsOpen: false })
-                if (x.target) select(x.target)
-              }}
-            >
-              <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${x.level === 'error' ? 'bg-err' : 'bg-warn'}`} />
-              <span className="flex-1">
-                <span className="text-xs">{x.text}</span>
-                {x.fix && <span className="block text-[11px] text-mute">{x.fix}</span>}
-              </span>
-              <span className="text-[10px] text-mute uppercase tracking-wider">{TABS.find((t) => t.id === x.workspace)?.label}</span>
-            </button>
+            <div key={i} className="flex items-center gap-2 border-b border-line hover:bg-raised pr-3">
+              <button
+                className="flex-1 flex items-start gap-3 pl-5 py-2.5 text-left"
+                onClick={() => {
+                  setUI({ workspace: x.workspace, warningsOpen: false })
+                  if (x.target) select(x.target)
+                }}
+              >
+                <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${x.level === 'error' ? 'bg-err' : 'bg-warn'}`} aria-hidden />
+                <span className="flex-1">
+                  <span className="text-xs">
+                    <span className="sr-only">{x.level === 'error' ? 'Error: ' : 'Warning: '}</span>
+                    {x.text}
+                  </span>
+                  {x.fix && <span className="block text-[11px] text-mute">{x.fix}</span>}
+                </span>
+                <span className="text-[10px] text-mute uppercase tracking-wider">{TABS.find((t) => t.id === x.workspace)?.label}</span>
+              </button>
+              {x.action && (
+                <button
+                  className="btn h-7 text-[11px] shrink-0"
+                  title="Applies the change in one step; Ctrl+Z undoes it"
+                  onClick={() => {
+                    useStore.getState().mutate((p) => x.action!.apply(p))
+                    if (x.target) select(x.target)
+                    useStore.getState().notify(`${x.action!.label}: done · Ctrl+Z to undo`)
+                  }}
+                >
+                  {x.action.label}
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
