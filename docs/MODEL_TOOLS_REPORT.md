@@ -33,6 +33,27 @@
 - Detail: Low, Medium or High, up to about 42,000 points.
 - Starting shape: ball, block or relief panel.
 
+## Also on this preview: the action bar and one-click fixes (merged from `smart-edit`)
+
+- **Action bar:** selecting an item in Ground, Stage, Set, Truss, LED, Seats or Decor shows a small bar at the top of the canvas, next to the stats strip. It holds actions for that item:
+  - screens: Content, Mirror;
+  - truss: Auto-rig;
+  - decor and set pieces: Floor, Centre on stage;
+  - anything outside the venue: Move inside;
+  - always: Duplicate, Delete, Deselect.
+- **One-click fixes in the warnings list:**
+  - Move inside venue;
+  - Auto-rig hoists;
+  - Raise to stage floor;
+  - Make it ground-stacked;
+  - Extend the truss.
+
+  Each is one undo step.
+- **Stage changed?** After the stage is resized, Stage, LED and Truss show "Keep the screens and truss in step with it?":
+  - **Preview** lists the changes; **Apply** makes them in one undo step; **Not now** dismisses it.
+  - It centres the main LED, moves side screens and their mirrors clear of the stage, and extends the trusses that span it.
+  - It never shortens a truss or stretches short pieces.
+
 ## Showcases
 - **Floral Mandap** uses most of the new tools together:
   - tiered podium;
@@ -90,4 +111,4 @@
 - **Cut-outs:** openings are a grid pattern, not freely drawn holes.
 - **3D text:** uses one typeface (Droid Sans Bold, Apache-2.0) from the jsDelivr CDN.
 - **Render:** has no ambient occlusion yet.
-- **Separate branch:** the earlier `smart-edit` work (on-canvas action bar, one-click warning fixes, fitting screens and truss to the stage) is still separate, with one test to finish.
+
