@@ -9,7 +9,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import type { OrbitControls as OrbitImpl } from 'three-stdlib'
-import { Zap, Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Orbit, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { Zap, Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Hand, Maximize, Orbit, Rotate3d, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useStore } from '../store'
 import type { Fixture, GroundItem, Project, Screen, Table, Truss } from '../types'
 import { fmt, screenColumns, screenStats, stageBounds, TRUSS_INFO, trussLength } from '../lib/calc'
@@ -28,7 +28,9 @@ type QualityPref = 'auto' | Quality
 const QKEY = 'unifest:quality'
 export type Palette = 'white' | 'warm' | 'ice' | 'duo' | 'rainbow'
 type RecordReq = { aspect: '16:9' | '9:16'; seconds: number; id: number }
-export type ViewCmd = { kind: 'rotate' | 'tilt' | 'zoom' | 'set-az' | 'set-el' | 'view' | 'reset'; value: number | string; n: number }
+export type ViewCmd = { kind: 'rotate' | 'tilt' | 'zoom' | 'set-az' | 'set-el' | 'view' | 'reset' | 'pan' | 'fit'; value: number | string | [number, number]; n: number }
+// Orbit: left-drag turns the view. Grab: left-drag slides across the ground like a map.
+export type Nav = 'orbit' | 'grab'
 export type Angles = { az: number; el: number }
 type Info = { title: string; lines: string[] }
 
@@ -93,7 +95,10 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [dropAt, setDropAt] = useState(0)
   const [viewCmd, setViewCmd] = useState<ViewCmd | null>(null)
   const [angles, setAngles] = useState<Angles>({ az: 0, el: 20 })
-  const view = (kind: ViewCmd['kind'], value: number | string = 0) => {
+  const [navPref, setNavPref] = useState<Nav>('orbit')
+  const [spaceGrab, setSpaceGrab] = useState(false)
+  const nav: Nav = spaceGrab ? 'grab' : navPref
+  const view = (kind: ViewCmd['kind'], value: ViewCmd['value'] = 0) => {
     setShowcase(false)
     setViewCmd({ kind, value, n: Date.now() + Math.random() })
   }
@@ -121,6 +126,52 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+  // Move across the ground: W/A/S/D (Shift for bigger steps). H = grab, V = orbit, hold Space to grab.
+  // Runs before the app-wide shortcuts so D does not switch on the 2D measure tool.
+  useEffect(() => {
+    if (compact) return
+    const typing = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable
+    }
+    const moves: Record<string, [number, number]> = { w: [0, 1], s: [0, -1], a: [-1, 0], d: [1, 0] }
+    const down = (e: KeyboardEvent) => {
+      if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (e.code === 'Space') {
+        if (e.target instanceof HTMLButtonElement) return
+        e.preventDefault()
+        if (!e.repeat) setSpaceGrab(true)
+        return
+      }
+      const m = moves[k]
+      if (m) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        setShowcase(false)
+        const big = e.shiftKey ? 3 : 1
+        setViewCmd({ kind: 'pan', value: [m[0] * big, m[1] * big], n: Date.now() + Math.random() })
+        return
+      }
+      if (k === 'h') setNavPref('grab')
+      if (k === 'v') setNavPref('orbit')
+      if (k === 'f') {
+        e.stopImmediatePropagation()
+        setShowcase(false)
+        setViewCmd({ kind: 'fit', value: 0, n: Date.now() + Math.random() })
+      }
+    }
+    const up = (e: KeyboardEvent) => e.code === 'Space' && setSpaceGrab(false)
+    const blur = () => setSpaceGrab(false)
+    window.addEventListener('keydown', down, true)
+    window.addEventListener('keyup', up, true)
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('keydown', down, true)
+      window.removeEventListener('keyup', up, true)
+      window.removeEventListener('blur', blur)
+    }
+  }, [compact])
   const fileRef = useRef<HTMLInputElement>(null)
   const notify = useStore((s) => s.notify)
 
@@ -132,7 +183,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const bg = look === 'tech' ? '#ededed' : look === 'day' ? '#b9c6d3' : '#000'
 
   return (
-    <div className="relative h-full w-full overflow-hidden" style={{ background: bg }}>
+    <div className={`relative h-full w-full overflow-hidden ${nav === 'grab' ? 'cursor-grab active:cursor-grabbing' : ''}`} style={{ background: bg }}>
       <Canvas
         shadows={quality === 'best' || (quality === 'show' && !lowPower)}
         dpr={quality === 'draft' ? 1 : quality === 'show' ? [1, 1.25] : [1, 2]}
@@ -163,6 +214,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
           }}
           onShowcaseStop={() => setShowcase(false)}
           viewCmd={viewCmd}
+          nav={nav}
           onAngles={setAngles}
           dropAt={dropAt}
           quality={quality}
@@ -284,7 +336,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
         )}
       </div>
 
-      <ViewPad angles={angles} view={view} compact={!!compact} />
+      <ViewPad angles={angles} view={view} compact={!!compact} nav={nav} setNav={setNavPref} />
 
       {info && (
         <div className="absolute right-[176px] top-20 z-10 glass rounded-xl p-4 w-64 fade-in">
@@ -306,7 +358,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
 
       {!compact && !rec && (
         <div className={`absolute left-4 bottom-4 text-[11px] hidden xl:flex items-center gap-1.5 ${look === 'show' ? 'text-mute' : 'text-black/50'}`}>
-          <Eye size={12} /> Drag to orbit · right-drag to pan · scroll to zoom · click anything for details
+          <Eye size={12} />
+          {nav === 'grab' ? 'Drag to grab and move · right-drag to orbit' : 'Drag to orbit · right-drag to grab'} · scroll zooms to the pointer · double-click to fly there · W A S D move · F whole ground
         </div>
       )}
 
@@ -336,16 +389,37 @@ const VIEWS = [
   ['back', 'Back'],
 ] as const
 
-function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd['kind'], v?: number | string) => void; compact: boolean }) {
+function NavToggle({ nav, setNav }: { nav: Nav; setNav: (n: Nav) => void }) {
+  return (
+    <div className="grid grid-cols-2 gap-1" role="group" aria-label="Mouse mode">
+      <button className={`btn h-7 px-0 justify-center text-[10px] ${nav === 'orbit' ? 'btn-on' : ''}`} title="Orbit (V): drag to turn the view" onClick={() => setNav('orbit')}>
+        <Rotate3d size={12} /> Orbit
+      </button>
+      <button className={`btn h-7 px-0 justify-center text-[10px] ${nav === 'grab' ? 'btn-on' : ''}`} title="Grab (H, or hold Space): drag to move across the ground" onClick={() => setNav('grab')}>
+        <Hand size={12} /> Grab
+      </button>
+    </div>
+  )
+}
+
+function ViewPad({ angles, view, compact, nav, setNav }: { angles: Angles; view: (k: ViewCmd['kind'], v?: ViewCmd['value']) => void; compact: boolean; nav: Nav; setNav: (n: Nav) => void }) {
   const [open, setOpen] = useState(!compact && useDevice.getState().kind !== 'phone')
   const deg = THREE.MathUtils.degToRad
   const btn = 'btn btn-icon h-8 w-8'
   const pos = compact ? 'top-28' : 'top-1/2 -translate-y-1/2'
   if (!open)
     return (
-      <button className={`absolute right-4 ${pos} z-10 glass rounded-xl btn h-9`} onClick={() => setOpen(true)} title="Turn and tilt the view">
-        <Compass size={14} /> View
-      </button>
+      <div className={`absolute right-4 ${pos} z-10 flex flex-col gap-1.5 items-end`}>
+        <button className="glass rounded-xl btn h-9" onClick={() => setOpen(true)} title="Turn and tilt the view">
+          <Compass size={14} /> View
+        </button>
+        <button className={`glass rounded-xl btn btn-icon h-9 w-9 ${nav === 'grab' ? 'btn-on' : ''}`} onClick={() => setNav(nav === 'grab' ? 'orbit' : 'grab')} title={nav === 'grab' ? 'Grab is on: one finger or drag moves across the ground' : 'Grab: drag to move across the ground'} aria-pressed={nav === 'grab'}>
+          <Hand size={14} />
+        </button>
+        <button className="glass rounded-xl btn btn-icon h-9 w-9" onClick={() => view('fit')} title="Show the whole ground">
+          <Maximize size={14} />
+        </button>
+      </div>
     )
   return (
     <div className={`absolute right-4 ${pos} z-10 glass rounded-xl p-2 w-[156px] fade-in select-none`} aria-label="View controls">
@@ -355,6 +429,10 @@ function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd[
           <X size={12} />
         </button>
       </div>
+      <NavToggle nav={nav} setNav={setNav} />
+      <button className="btn h-7 w-full justify-center text-[10px] mt-1 mb-2" onClick={() => view('fit')} title="Frame the whole ground (F)">
+        <Maximize size={12} /> Whole ground
+      </button>
       {/* Compass: the needle points from the stage towards the camera (F = front of house) */}
       <div className="relative mx-auto h-[72px] w-[72px] rounded-full border border-line-hi">
         {['F', 'R', 'B', 'L'].map((l, i) => (
@@ -409,7 +487,7 @@ function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd[
           </button>
         ))}
       </div>
-      {!compact && <p className="text-[9px] mt-1.5 px-1 leading-snug text-mute">Arrow keys turn and tilt · Shift for 45°</p>}
+      {!compact && <p className="text-[9px] mt-1.5 px-1 leading-snug text-mute">Arrows turn and tilt · W A S D move · double-click the ground to fly there</p>}
     </div>
   )
 }
@@ -438,7 +516,17 @@ interface SceneProps {
   onRecDone: (ok: boolean) => void
   onShowcaseStop: () => void
   viewCmd: ViewCmd | null
+  nav: Nav
   onAngles: (a: Angles) => void
+}
+
+// The point the camera looks at stays over the venue (plus a margin) and between the floor and 40 m up.
+function clampTarget(v: THREE.Vector3, W: number, L: number) {
+  const m = Math.max(10, Math.max(W, L) * 0.15)
+  v.x = THREE.MathUtils.clamp(v.x, -m, W + m)
+  v.z = THREE.MathUtils.clamp(v.z, -m, L + m)
+  v.y = THREE.MathUtils.clamp(v.y, 0, 40)
+  return v
 }
 
 function focusOf(project: Project) {
@@ -461,8 +549,8 @@ function Scene(props: SceneProps) {
   const show = look === 'show'
   // ?debug3d in the address exposes the renderer for performance checks.
   useEffect(() => {
-    if (location.search.includes('debug3d')) (window as unknown as { __u3d: unknown }).__u3d = { gl, scene }
-  }, [gl, scene])
+    if (location.search.includes('debug3d')) (window as unknown as { __u3d: unknown }).__u3d = { gl, scene, camera, controls }
+  }, [gl, scene, camera])
 
   useEffect(() => {
     if (look === 'tech') {
@@ -534,6 +622,29 @@ function Scene(props: SceneProps) {
       fly.current = cameraFor(preset)
       return
     }
+    const big = Math.max(W, L)
+    if (cmd.kind === 'pan' && Array.isArray(cmd.value)) {
+      // Slide across the ground relative to where the camera faces.
+      const fwd = ctl.target.clone().sub(camera.position).setY(0)
+      if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1)
+      fwd.normalize()
+      const right = new THREE.Vector3().crossVectors(fwd, THREE.Object3D.DEFAULT_UP).normalize()
+      const step = THREE.MathUtils.clamp(camera.position.distanceTo(ctl.target) * 0.18, 1, big * 0.25)
+      const d = right.multiplyScalar(cmd.value[0] * step).add(fwd.multiplyScalar(cmd.value[1] * step))
+      const base = fly.current ?? { pos: camera.position.clone(), target: ctl.target.clone() }
+      const target = clampTarget(base.target.clone().add(d), W, L)
+      fly.current = { pos: base.pos.clone().add(target.clone().sub(base.target)), target }
+      return
+    }
+    if (cmd.kind === 'fit') {
+      // The whole ground, from a high three-quarter angle, keeping the current direction.
+      const cur = new THREE.Spherical().setFromVector3(camera.position.clone().sub(ctl.target))
+      const aspect = size.width / Math.max(1, size.height)
+      const sph = new THREE.Spherical(big * (aspect < 1 ? 1.6 : 1.05), 0.75, cur.theta)
+      const target = new THREE.Vector3(W / 2, 0, L / 2)
+      fly.current = { pos: new THREE.Vector3().setFromSpherical(sph).add(target), target, sph }
+      return
+    }
     const t = ctl.target.clone()
     const sph = new THREE.Spherical().setFromVector3(camera.position.clone().sub(t))
     const v = Number(cmd.value)
@@ -556,10 +667,44 @@ function Scene(props: SceneProps) {
       }
     }
     sph.phi = THREE.MathUtils.clamp(sph.phi, minPhi, maxPhi)
-    sph.radius = THREE.MathUtils.clamp(sph.radius, 2, Math.max(W, L) * 3)
+    sph.radius = THREE.MathUtils.clamp(sph.radius, 1, Math.max(W, L) * 3)
     fly.current = { pos: new THREE.Vector3().setFromSpherical(sph).add(t), target: t, sph }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.viewCmd])
+
+  // Double-click anywhere on the ground (or on an object) to fly in close to that spot.
+  useEffect(() => {
+    const el = gl.domElement
+    const ray = new THREE.Raycaster()
+    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const onDbl = (e: MouseEvent) => {
+      const ctl = controls.current
+      if (!ctl || rec) return
+      const r = el.getBoundingClientRect()
+      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera)
+      let hit: THREE.Vector3 | null = null
+      // Real objects first (stage, screens, truss), skipping sky, stars and the big floor.
+      for (const h of ray.intersectObjects(scene.children, true)) {
+        const o = h.object as THREE.Mesh
+        if (!o.isMesh || !o.visible || h.distance > 2000) continue
+        const m = o.material as THREE.Material
+        if (m?.side === THREE.BackSide || (o.geometry as THREE.BufferGeometry)?.type === 'PlaneGeometry') continue
+        hit = h.point.clone()
+        break
+      }
+      if (!hit) hit = ray.ray.intersectPlane(floor, new THREE.Vector3())
+      if (!hit) return
+      setShowcase()
+      const target = clampTarget(hit, W, L)
+      const cur = new THREE.Spherical().setFromVector3(camera.position.clone().sub(ctl.target))
+      const sph = new THREE.Spherical(THREE.MathUtils.clamp(cur.radius * 0.45, 4, 30), THREE.MathUtils.clamp(cur.phi, 0.35, 1.35), cur.theta)
+      fly.current = { pos: new THREE.Vector3().setFromSpherical(sph).add(target), target, sph }
+    }
+    const setShowcase = () => showcase && props.onShowcaseStop()
+    el.addEventListener('dblclick', onDbl)
+    return () => el.removeEventListener('dblclick', onDbl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gl, camera, scene, W, L, rec, showcase])
 
   const tmpSph = useMemo(() => new THREE.Spherical(), [])
   const lastAngles = useRef({ az: -1, el: -1, at: 0 })
@@ -582,6 +727,15 @@ function Scene(props: SceneProps) {
       if (camera.position.distanceTo(fly.current.pos) < 0.05 && ctl.target.distanceTo(fly.current.target) < 0.05) fly.current = null
     }
     ctl.update()
+    // Keep the view over the venue so nobody gets lost in empty space.
+    const t0 = ctl.target
+    const tc = clampTarget(t0.clone(), W, L)
+    if (tc.distanceToSquared(t0) > 1e-8) {
+      const d = tc.sub(t0)
+      t0.add(d)
+      camera.position.add(d)
+    }
+    if (camera.position.y < 0.3) camera.position.y = 0.3
     // Report the viewing angle a few times a second for the on-screen readout.
     if (clock.elapsedTime - lastAngles.current.at > 0.15) {
       const s = tmpSph.setFromVector3(camera.position.clone().sub(ctl.target))
@@ -621,8 +775,13 @@ function Scene(props: SceneProps) {
         autoRotateSpeed={0.6}
         minPolarAngle={0.02}
         maxPolarAngle={Math.PI / 2 - 0.02}
-        minDistance={2}
+        minDistance={1}
         maxDistance={Math.max(W, L) * 3}
+        zoomToCursor
+        screenSpacePanning={false}
+        panSpeed={1.2}
+        mouseButtons={props.nav === 'grab' ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE } : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+        touches={props.nav === 'grab' ? { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE } : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
         onStart={() => {
           fly.current = null
           if (showcase) props.onShowcaseStop()
