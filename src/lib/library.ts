@@ -1,4 +1,5 @@
 import type { Project } from '../types'
+import { normalizeProject } from './migrate'
 
 // Every project lives in its own localStorage key; a small index lists them for the home screen.
 const LIB_KEY = 'unifest:library'
@@ -46,7 +47,7 @@ export function readProject(id: string): Project | null {
   let raw: string | null = null
   try {
     raw = localStorage.getItem(pKey(id))
-    return raw ? (JSON.parse(raw) as Project) : null
+    return raw ? normalizeProject(JSON.parse(raw)) : null
   } catch {
     // Keep a damaged save aside instead of losing it, so it can be recovered by hand.
     try {
@@ -73,7 +74,7 @@ export function loadCurrent(): Project | null {
   try {
     const legacy = localStorage.getItem(LEGACY_KEY)
     if (legacy) {
-      const p = JSON.parse(legacy) as Project
+      const p = normalizeProject(JSON.parse(legacy))
       p.id ??= Math.random().toString(36).slice(2, 12)
       writeProject(p)
       localStorage.removeItem(LEGACY_KEY)

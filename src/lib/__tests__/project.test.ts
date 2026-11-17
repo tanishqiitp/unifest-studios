@@ -221,3 +221,25 @@ describe('Share links and seating', () => {
     g.location.hash = ''
   })
 })
+
+describe('Project migration', () => {
+  it('opens an old or partial project without crashing', async () => {
+    const { normalizeProject } = await import('../migrate')
+    const p = normalizeProject({ version: 1, name: '', screens: [], ground: [{ kind: 'crowd', x: 0, y: 0, w: 5, h: 5 }], venue: { w: 'x' } })
+    expect(p.decks).toEqual([])
+    expect(p.tables).toEqual([])
+    expect(p.venue.w).toBe(60)
+    expect(p.ground[0].id).toBeTruthy()
+    expect(p.name).toBe('Untitled event')
+  })
+  it('rejects files that are not projects or come from a newer version', async () => {
+    const { normalizeProject } = await import('../migrate')
+    expect(() => normalizeProject({ hello: 1 })).toThrow()
+    expect(() => normalizeProject({ version: 9, screens: [] })).toThrow(/newer version/)
+  })
+  it('round-trips a template unchanged', async () => {
+    const { normalizeProject } = await import('../migrate')
+    const t = generateProject(TEMPLATES[0])
+    expect(normalizeProject(structuredClone(t))).toEqual(t)
+  })
+})

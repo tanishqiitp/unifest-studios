@@ -1,3 +1,4 @@
+import { normalizeProject } from './migrate'
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js'
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
@@ -93,7 +94,7 @@ export async function listCloudProjects(): Promise<CloudEntry[]> {
 export async function fetchCloudProject(id: string): Promise<Project | null> {
   const { data, error } = await need().from('projects').select('data').eq('id', id).maybeSingle()
   if (error) throw new Error(error.message)
-  return (data?.data as Project) ?? null
+  return data?.data ? normalizeProject(data.data) : null
 }
 
 export async function deleteCloudProject(id: string) {
@@ -141,7 +142,7 @@ export async function fetchShare(code: string): Promise<Project | null> {
   if (!supabase) return null
   const { data, error } = await supabase.rpc('get_share', { share_code: code })
   if (error || !data) return null
-  return restoreDefaults(data as Project)
+  return restoreDefaults(normalizeProject(data))
 }
 
 // ---------- client feedback on short links ----------

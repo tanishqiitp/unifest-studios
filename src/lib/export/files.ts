@@ -1,3 +1,4 @@
+import { normalizeProject } from '../migrate'
 import Drawing from 'dxf-writer'
 import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string'
 import type { Deck, Project, Table } from '../../types'
@@ -237,9 +238,13 @@ export function exportProject(p: Project) {
 
 export function readProjectFile(f: File): Promise<Project> {
   return f.text().then((t) => {
-    const p = JSON.parse(t) as Project
-    if (p.version !== 1 || !Array.isArray(p.screens)) throw new Error('Not a Unifest project file')
-    return p
+    let data: unknown
+    try {
+      data = JSON.parse(t)
+    } catch {
+      throw new Error('This file is not a Unifest project (it could not be read).')
+    }
+    return normalizeProject(data)
   })
 }
 
@@ -342,7 +347,7 @@ export function readShareHash(): Project | null {
   if (!m) return null
   try {
     const p = JSON.parse(decompressFromEncodedURIComponent(m[1]) ?? 'null') as Project | null
-    return p ? restoreDefaults(p) : null
+    return p ? restoreDefaults(normalizeProject(p)) : null
   } catch {
     return null
   }
