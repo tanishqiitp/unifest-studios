@@ -1,10 +1,11 @@
+import { exportProject } from './lib/export/files'
 import { loadSummary } from './lib/loads'
 import { AppCrash, ErrorBoundary, Safe3D } from './components/Safe3D'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
 import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
-import { redo, saveNow, undo, useStore } from './store'
+import { redo, saveNow, undo, useSave, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
 import { getWarnings } from './lib/warnings'
@@ -463,12 +464,14 @@ function ToolRail() {
   )
 }
 
-const SAVE_LABEL = { idle: 'Autosaved · cloud sync on', saving: 'Saving to cloud…', saved: 'Saved to cloud', offline: 'Saved in this browser · cloud unreachable' } as const
+// Where the latest edit is stored: this device, the cloud, or neither (failed).
+const CLOUD_LABEL = { idle: 'Saved on this device · cloud sync on', saving: 'Saved on this device · saving to cloud…', saved: 'Saved on this device and to cloud', offline: 'Saved on this device · offline, cloud will retry' } as const
 
 function WarningsBar() {
   const project = useStore((s) => s.project)
   const { user, sync } = useAuth()
-  const saveLabel = user ? SAVE_LABEL[sync] : 'Autosaved in this browser'
+  const local = useSave((s) => s.local)
+  const saveLabel = local === 'saving' ? 'Saving…' : local === 'failed' ? 'Save failed on this device (storage full or blocked)' : user ? CLOUD_LABEL[sync] : 'Saved on this device only'
   const open = useStore((s) => s.ui.warningsOpen)
   const { setUI, select } = useStore.getState()
   const w = getWarnings(project)
@@ -502,7 +505,12 @@ function WarningsBar() {
           {w.length ? <AlertTriangle size={13} className={errors ? 'text-err' : 'text-warn'} /> : <span className="h-2 w-2 rounded-full bg-white" />}
           {w.length ? `${errors} errors · ${w.length - errors} warnings` : 'All checks passed'}
         </button>
-        <span className="text-mute truncate ml-3">{saveLabel}<span className="hidden md:inline"> · {project.eventType}</span><span className="hidden md:inline"> · {project.audience.toLocaleString('en-IN')} guests</span></span>
+        {local === 'failed' && (
+          <button className="ml-3 underline text-white shrink-0" onClick={() => exportProject(project)} title="Download the project as a file so nothing is lost">
+            Save a copy as a file
+          </button>
+        )}
+        <span className={`truncate ml-3 ${local === 'failed' ? 'text-err' : 'text-mute'}`} role="status" aria-live="polite">{saveLabel}<span className="hidden md:inline"> · {project.eventType}</span><span className="hidden md:inline"> · {project.audience.toLocaleString('en-IN')} guests</span></span>
       </footer>
     </>
   )

@@ -43,10 +43,17 @@ export function writeProject(p: Project, current = true): boolean {
 }
 
 export function readProject(id: string): Project | null {
+  let raw: string | null = null
   try {
-    const raw = localStorage.getItem(pKey(id))
+    raw = localStorage.getItem(pKey(id))
     return raw ? (JSON.parse(raw) as Project) : null
   } catch {
+    // Keep a damaged save aside instead of losing it, so it can be recovered by hand.
+    try {
+      if (raw) localStorage.setItem(`unifest:damaged:${id}`, raw)
+    } catch {
+      /* storage full */
+    }
     return null
   }
 }

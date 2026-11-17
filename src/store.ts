@@ -106,14 +106,23 @@ export const useStore = create<State>()(
         syncMirrors(p)
         syncSetMirrors(p)
         p.updatedAt = Date.now()
-        set({ project: p })
+        // A slider drag or typing in one field becomes one undo step, not one per change.
+        if (mergeWithLast()) {
+          const t = useStore.temporal.getState()
+          t.pause()
+          set({ project: p })
+          t.resume()
+        } else set({ project: p })
       },
       setProject: (p) => {
         if (!p.id) p.id = nanoid(10)
         withSeating(p)
         syncMirrors(p)
         syncSetMirrors(p)
+        const opened = p.id !== get().project.id
         set({ project: p, ui: { ...get().ui, selection: null, extra: [] } })
+        // Undo history belongs to one project; replacing the open project's content stays undoable.
+        if (opened) queueMicrotask(() => useStore.temporal.getState().clear())
       },
       setUI: (u) => set({ ui: { ...get().ui, ...u } }),
       select: (selection) => {
@@ -140,16 +149,78 @@ export const useStore = create<State>()(
   ),
 )
 
-export const undo = () => useStore.temporal.getState().undo()
-export const redo = () => useStore.temporal.getState().redo()
+// Consecutive changes from the same focused form control within 1.5 s merge into one undo step.
+let lastControl: Element | null = null
+let lastAt = 0
+function mergeWithLast() {
+  if (typeof document === 'undefined') return false
+  const el = document.activeElement
+  const now = Date.now()
+  const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+  const merge = field && el === lastControl && now - lastAt < 1500
+  lastControl = field ? el : null
+  lastAt = now
+  return merge
+}
+
+// After undo/redo, drop a selection whose item no longer exists.
+function reconcileSelection() {
+  const { project: p, ui } = useStore.getState()
+  const sel = ui.selection
+  if (!sel) return
+  const lists: Record<string, { id: string }[] | undefined> = {
+    screen: p.screens,
+    ground: p.ground,
+    deck: p.decks,
+    truss: p.truss,
+    hoist: p.hoists,
+    fixture: p.fixtures,
+    table: p.tables,
+    decor: p.decor,
+    set: p.set,
+    comment: (p as unknown as { comments?: { id: string }[] }).comments,
+  }
+  const list = lists[sel.kind]
+  if (list && !list.some((x) => x.id === sel.id)) useStore.setState({ ui: { ...ui, selection: null, extra: [] } })
+}
+export const undo = () => {
+  lastControl = null
+  useStore.temporal.getState().undo()
+  reconcileSelection()
+}
+export const redo = () => {
+  lastControl = null
+  useStore.temporal.getState().redo()
+  reconcileSelection()
+}
+
+// Save status on this device: shown in the footer so a failed save is never silent.
+export const useSave = create<{ local: 'saving' | 'saved' | 'failed'; at: number }>(() => ({ local: 'saved', at: 0 }))
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+let pending = false
+function writeLocal() {
+  clearTimeout(saveTimer)
+  pending = false
+  const ok = writeProject(useStore.getState().project)
+  useSave.setState({ local: ok ? 'saved' : 'failed', at: Date.now() })
+  return ok
+}
 useStore.subscribe((s, prev) => {
   if (s.project === prev.project) return
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => writeProject(s.project), 400)
+  pending = true
+  if (useSave.getState().local !== 'saving') useSave.setState({ local: 'saving' })
+  saveTimer = setTimeout(writeLocal, 400)
   scheduleCloudSave()
 })
+// Write the last edit straight away when the tab is hidden or closed, so nothing waits on the timer.
+if (typeof window !== 'undefined') {
+  const flush = () => pending && writeLocal()
+  window.addEventListener('pagehide', flush)
+  window.addEventListener('beforeunload', flush)
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && flush())
+}
 
 // Signed-in users also get a cloud copy, a little after they stop editing.
 let cloudTimer: ReturnType<typeof setTimeout> | undefined
@@ -169,8 +240,11 @@ export function scheduleCloudSave(delay = 1500) {
 
 export function saveNow() {
   scheduleCloudSave(0)
-  return writeProject(useStore.getState().project)
+  return writeLocal()
 }
+
+// Back online: retry the cloud copy straight away.
+if (typeof window !== 'undefined') window.addEventListener('online', () => scheduleCloudSave(0))
 
 // After signing in, back up the open project straight away.
 useAuth.subscribe((a, prev) => {
