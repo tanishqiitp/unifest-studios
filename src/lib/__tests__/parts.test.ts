@@ -102,3 +102,20 @@ describe('Celestial Crown (sculpted)', () => {
     expect(slimArch(0.05).every(([u, v]) => u >= -1e-9 && u <= 1 + 1e-9 && v >= 0 && v <= 1)).toBe(true)
   })
 })
+
+describe('Floral Mandap', () => {
+  it('uses the new tools and keeps the arch standing on the podium', async () => {
+    const { buildAssembly } = await import('../parts')
+    const { generateProject, TEMPLATES } = await import('../templates')
+    const parts = buildAssembly(generateProject(TEMPLATES[0]), 'mandap')
+    const kinds = new Set(parts.map((x) => x.kind))
+    for (const k of ['drape', 'path', 'text', 'lathe', 'dome']) expect(kinds.has(k as never)).toBe(true)
+    expect(parts.some((x) => x.array?.mode === 'surface')).toBe(true)
+    expect(parts.some((x) => x.holes)).toBe(true)
+    expect(parts.some((x) => x.cage)).toBe(true)
+    const arch = parts.find((x) => x.name === 'Floral arch')!
+    const topTier = parts.find((x) => x.name === 'Podium tier 3')!
+    const legReach = Math.hypot(arch.w / 2, arch.pos[1])
+    expect(legReach).toBeLessThan(topTier.w / 2)
+  })
+})

@@ -167,8 +167,9 @@ export function partArea(p: Part) {
 
 // ---------- ready-made assemblies ----------
 
-export type AssemblyId = 'crown' | 'festival' | 'staircase' | 'colonnade' | 'podium' | 'chandelier' | 'portal' | 'dome-pavilion'
+export type AssemblyId = 'mandap' | 'crown' | 'festival' | 'staircase' | 'colonnade' | 'podium' | 'chandelier' | 'portal' | 'dome-pavilion'
 export const ASSEMBLIES: { id: AssemblyId; name: string; blurb: string }[] = [
+  { id: 'mandap', name: 'Floral Mandap', blurb: 'Tiered podium, flared gold pillars, swag drapes, flower-covered canopy, floral arch, lattice back, 3D names' },
   { id: 'crown', name: 'Celestial Crown (sculpted)', blurb: 'Sculpted LED orb, gyroscope halos, twisted spire crown, feathered wings, ribbon arches' },
   { id: 'festival', name: 'Festival stage', blurb: 'Platform, centre LED in three nested arches, mirrored wings with rising fins, angled towers' },
   { id: 'staircase', name: 'Grand staircase', blurb: 'Wide steps with side walls, up to the stage' },
@@ -195,9 +196,45 @@ export function buildAssembly(p: Project, id: AssemblyId): Part[] {
   const at: Vec3 = [L.cx, L.front + 3, 0]
   const g = newPart('group', at, { name: ASSEMBLIES.find((a) => a.id === id)!.name })
   const kid = (kind: PartKind, pos: Vec3, extra: Partial<Part> = {}) => newPart(kind, pos, { parent: g.id, ...extra })
+  const sub0 = (name: string, pos: Vec3) => newPart('group', pos, { parent: g.id, name })
   const gold = MAT_PRESETS.Gold
   let kids: Part[] = []
-  if (id === 'crown') {
+  if (id === 'mandap') {
+    // A wedding mandap built with the shaping tools: spin, cage, drapes, scatter, curves, cut-outs, 3D text.
+    const hasStage = p.decks.length > 0
+    const top = hasStage ? L.deckH : 0
+    g.pos = [L.cx, hasStage ? (L.y - 0.4 + L.front) / 2 : L.front + 6, 0]
+    const ivory = { color: '#f3e9d8', metal: 0, rough: 0.85 }
+    const gold = MAT_PRESETS.Gold
+    const blush = { color: '#f2a7c3', metal: 0, rough: 0.8 }
+    const span = 5.2 // between pillar centres
+    const pillarH = 4
+    // Three tiers; the top one (8.6 m across) is wide enough for the pillars and the floral arch to stand on.
+    const podium = [0, 1, 2].map((i) => kid('cylinder', [0, 0, top + i * 0.2], { name: `Podium tier ${i + 1}`, w: 9.8 - i * 0.6, d: 9.8 - i * 0.6, h: 0.2, seg: 64, mat: i === 2 ? gold : ivory }))
+    const floor = top + 0.6
+    const pillars = sub0('Pillars', [0, 0, floor])
+    const pillarKids = [-1, 1].flatMap((sx) =>
+      [-1, 1].map((sy) =>
+        newPart('lathe', [(sx * span) / 2, (sy * span) / 2, 0], { parent: pillars.id, name: 'Pillar', w: 0.42, d: 0.42, h: pillarH, seg: 32, profile: LATHE_PRESETS.Column, cage: { front: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.35, 0, 0, 0, 0.35, 0], side: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.35, 0, 0, 0, 0.35, 0] }, mat: gold }),
+      ),
+    )
+    // Swag drapes on all four sides, just under the canopy.
+    const drapes = sub0('Drapes', [0, 0, floor + pillarH - 1.3])
+    const drapeKids = [0, 90, 180, 270].map((turn) => {
+      const a = (turn * Math.PI) / 180
+      return newPart('drape', [Math.sin(a) * (span / 2), Math.cos(a) * (span / 2), 0], { parent: drapes.id, name: 'Swag drape', w: span - 0.3, d: 0.25, h: 1.3, steps: 18, swags: 2, sag: 0.45, rot: [0, 0, turn], mat: ivory })
+    })
+    // Canopy dome covered in flowers.
+    const canopy = kid('dome', [0, 0, floor + pillarH], { name: 'Canopy', w: span + 0.8, d: span + 0.8, h: 1.6, seg: 48, mat: ivory })
+    const canopyFlowers = newPart('sphere', [0, 0, 0], { parent: canopy.id, name: 'Canopy flowers', w: 0.22, d: 0.22, h: 0.16, organic: 0.3, mat: blush, array: { mode: 'surface', count: 420, offset: [0, 0, 0], grow: 0.35, turn: 360 } })
+    // Floral arch at the front, flowers along a gold curve.
+    const arch = kid('path', [0, span / 2 + 0.35, floor], { name: 'Floral arch', w: span + 0.6, h: pillarH + 0.8, d: 1, form: 'tube', thick: 0.07, profile: [[0, 0], [0.02, 0.6], [0.5, 1], [0.98, 0.6], [1, 0]], mat: gold })
+    const archFlowers = newPart('sphere', [0, 0, 0], { parent: arch.id, name: 'Arch flowers', w: 0.2, d: 0.2, h: 0.15, organic: 0.3, mat: { color: '#ffffff', metal: 0, rough: 0.8 }, array: { mode: 'surface', count: 260, offset: [0, 0, 0], grow: 0.4, turn: 360 } })
+    // Gold lattice behind, and the couple's initials in 3D on the podium front.
+    const lattice = kid('box', [0, -span / 2 - 0.4, floor], { name: 'Lattice backdrop', w: span + 0.4, d: 0.08, h: pillarH - 0.2, holes: { shape: 'diamond', cols: 7, rows: 8, size: 0.72 }, mat: gold })
+    const names = kid('text', [0, 4.95, top + 0.02], { name: 'Names', text: 'A & R', w: 2.4, h: 0.45, d: 0.12, solid: true, bevel: 1, mat: gold })
+    kids = [...podium, pillars, ...pillarKids, drapes, ...drapeKids, canopy, canopyFlowers, arch, archFlowers, lattice, names]
+  } else if (id === 'crown') {
     // A sculptural centrepiece built only from editable tools: sculpt, taper, twist, bend, spin,
     // extrude and growing radial arrays. Every piece can be selected, resized, recoloured or hidden.
     const hasStage = p.decks.length > 0
