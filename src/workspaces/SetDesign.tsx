@@ -13,6 +13,8 @@ import { readImage } from './Decor'
 import { Check, Num, Section, Sel, Stat, Txt } from '../components/ui'
 import { fmt } from '../lib/calc'
 import { SetCad3D } from './SetCad3D'
+import { AlignBar, SnapGuides, useGuides } from '../components/Align'
+import { snapRect } from '../lib/snap'
 
 // Flat front-view colours for each skin (the 3D view shows the real materials).
 export const SKIN_FILL: Record<Skin, string> = {
@@ -234,6 +236,9 @@ function SetViews() {
       )}
       <div className={`absolute left-1/2 -translate-x-1/2 ${layout === 'quad' ? 'bottom-2' : 'bottom-4'} z-10 flex flex-col items-center gap-1.5 pointer-events-none`}>
         {draw && tool !== 'select' && <div className="glass rounded-lg px-3 py-1.5 text-[11px] text-dim">{active.how} Esc to stop.</div>}
+        <div className="pointer-events-auto">
+          <AlignBar ws="set" />
+        </div>
         <div className="glass rounded-xl flex items-center gap-1 p-1 pointer-events-auto">
           {(['front', 'top', 'side', '3d', 'quad'] as Layout[]).map((v) => (
             <button key={v} className={`btn h-8 px-2.5 text-[11px] ${layout === v ? 'btn-on' : ''}`} title={v === 'quad' ? 'Front, top, side and 3D at once, like CAD' : `${v === '3d' ? '3D' : VIEW_NAME[v as CadView]} view`} onClick={() => setLayout(v)}>
@@ -371,6 +376,7 @@ function ViewPane({ view, tool, done, compact }: { view: CadView; tool: Tool; do
         .map((s) => (
           <PieceNode key={s.id} s={s} view={view} listening={!drawing} />
         ))}
+      <SnapGuides pane={`set-${view}`} />
       <AxisTriad view={view} b={b} />
       {preview.length > 0 && <Sketch tool={tool as DrawTool} pts={preview} />}
     </PlanCanvas>
@@ -518,21 +524,6 @@ function useImg(src?: string) {
   return img
 }
 
-// Snap an edge or centre to nearby pieces' edges/centres, else to a 0.25 m grid.
-function snapTo(v: number, half: number, targets: number[], tol: number) {
-  let best = Math.round(v * 4) / 4
-  let d = Infinity
-  for (const t of targets)
-    for (const off of [-half, 0, half]) {
-      const dd = Math.abs(v + off - t)
-      if (dd < tol && dd < d) {
-        d = dd
-        best = t - off
-      }
-    }
-  return best
-}
-
 function PieceNode({ s, view, listening }: { s: SetPiece; view: CadView; listening: boolean }) {
   const v = useView()
   const sel = useStore((st) => st.ui.selection)
@@ -555,11 +546,11 @@ function PieceNode({ s, view, listening }: { s: SetPiece; view: CadView; listeni
   const others = set.filter((o) => o.id !== s.id && o.mirrorOf !== s.id)
   // Snap targets along the view's horizontal (a) and vertical (b) axes, in canvas coordinates.
   const boxes = others.map((o) => footprint(o, view))
-  const as = boxes.flatMap((o) => [o.x, o.x + o.w / 2, o.x + o.w])
-  const bs = [...(view === 'top' ? [] : [0, -deckH]), ...boxes.flatMap((o) => [o.y, o.y + o.h])]
+  const magnet = useStore((st) => st.ui.magnet)
+  const picked = useStore((st) => st.ui.extra.some((e) => e.kind === 'set' && e.id === s.id))
   const tol = 10 / v.scale
   const fill = fillOf(s.skin, s.color)
-  const stroke = selected ? '#ffffff' : s.outline ? s.outline.color : '#ffffff40'
+  const stroke = selected || picked ? '#ffffff' : s.outline ? s.outline.color : '#ffffff40'
   const sw = selected ? 2 : s.outline ? 2 : 1
   const b = s.border ?? 0.6
   const innerFill = s.inner === 'open' || !s.inner ? undefined : fillOf(s.inner as Skin, s.color)
@@ -584,12 +575,16 @@ function PieceNode({ s, view, listening }: { s: SetPiece; view: CadView; listeni
         }}
         onDragMove={(e) => {
           const n = e.target
-          const ca = snapTo(n.x(), f.w / 2, as, tol)
-          let cb = snapTo(n.y(), f.h / 2, bs, tol)
+          // Magnet on: edges and centres snap to other pieces, the ground and the stage top (pink guides).
+          const r = { x: n.x() - f.w / 2, y: n.y() - f.h / 2, w: f.w, h: f.h }
+          const sn = magnet ? snapRect(r, boxes, tol, { hLines: view === 'top' ? [] : [0, -deckH] }) : { x: r.x, y: r.y, guides: [] }
+          let cb = sn.y + f.h / 2
           if (view !== 'top') cb = Math.min(cb, -f.h / 2) // nothing below the ground
-          n.position({ x: ca, y: cb })
+          n.position({ x: sn.x + f.w / 2, y: cb })
+          useGuides.getState().set(`set-${view}`, sn.guides)
         }}
         onDragEnd={(e) => {
+          useGuides.getState().set(null, [])
           const n = e.target
           mutate((p) => Object.assign(p.set!.find((x) => x.id === s.id)!, fromFootprint(view, { x: n.x() - f.w / 2, y: n.y() - f.h / 2, w: f.w, h: f.h })))
         }}

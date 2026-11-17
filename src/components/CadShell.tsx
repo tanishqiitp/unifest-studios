@@ -7,6 +7,8 @@ import { useStore } from '../store'
 import { PlanCanvas, useView } from './PlanCanvas'
 import { applyBox, CAD_EDITS, cadItems, fromRect, toRect, type CadItem, type FlatView } from '../lib/cad'
 import { SetCad3D } from '../workspaces/SetCad3D'
+import { AlignBar, SnapGuides, useGuides } from './Align'
+import { snapRect } from '../lib/snap'
 
 // CAD-style views for a workspace: its own editor (the "home" view) plus the other flat views and 3D,
 // one at a time or all four together. Every view shows everything; only the workspace's own items move.
@@ -56,6 +58,7 @@ export function CadShell({ ws, home, children, extraBar }: { ws: string; home: F
         pane(layout, false)
       )}
       <ViewBar layout={layout} setLayout={setLayout} extra={extraBar} quad={layout === 'quad'} />
+      <AlignBar ws={ws} className={`absolute left-1/2 -translate-x-1/2 ${layout === 'quad' ? 'bottom-3' : 'bottom-16'}`} />
     </div>
   )
 }
@@ -118,6 +121,7 @@ export function FlatPane({ view, ws, compact }: { view: FlatView; ws: string; co
       {sorted.map((i) => (
         <ItemNode key={`${i.kind}-${i.id}`} item={i} view={view} editable={kinds.includes(i.kind) && !i.locked} all={items} />
       ))}
+      <SnapGuides pane={view} />
       <Triad view={view} b={b} />
     </PlanCanvas>
   )
@@ -134,23 +138,11 @@ function Ground({ view, b }: { view: FlatView; b: { x: number; y: number; w: num
   )
 }
 
-function snap(v: number, half: number, targets: number[], tol: number) {
-  let best = Math.round(v * 4) / 4
-  let d = Infinity
-  for (const t of targets)
-    for (const off of [-half, 0, half]) {
-      const dd = Math.abs(v + off - t)
-      if (dd < tol && dd < d) {
-        d = dd
-        best = t - off
-      }
-    }
-  return best
-}
-
 function ItemNode({ item, view, editable, all }: { item: CadItem; view: FlatView; editable: boolean; all: CadItem[] }) {
   const v = useView()
   const sel = useStore((s) => s.ui.selection)
+  const picked = useStore((s) => s.ui.extra.some((e) => e.kind === item.kind && e.id === item.id))
+  const magnet = useStore((s) => s.ui.magnet)
   const { mutate, select } = useStore.getState()
   const ref = useRef<Konva.Rect>(null)
   const tr = useRef<Konva.Transformer>(null)
@@ -163,8 +155,6 @@ function ItemNode({ item, view, editable, all }: { item: CadItem; view: FlatView
     }
   }, [selected, editable, item.resize])
   const others = all.filter((o) => o !== item).map((o) => toRect(o.box, view))
-  const as = others.flatMap((o) => [o.x, o.x + o.w / 2, o.x + o.w])
-  const bs = [...(view === 'top' ? [] : [0]), ...others.flatMap((o) => [o.y, o.y + o.h])]
   const tol = 10 / v.scale
   const truss = item.kind === 'truss'
   const fill = item.kind === 'screen' ? '#1d2b4a' : item.kind === 'fixture' ? '#cfcfcf' : truss ? '#00000000' : item.color
@@ -179,8 +169,8 @@ function ItemNode({ item, view, editable, all }: { item: CadItem; view: FlatView
         height={r.h}
         fill={real(fill)}
         opacity={editable ? 0.9 : 0.3}
-        stroke={selected ? '#ffffff' : truss ? '#9a9a9a' : '#ffffff40'}
-        strokeWidth={selected ? 2 : 1}
+        stroke={selected || picked ? '#ffffff' : truss ? '#9a9a9a' : '#ffffff40'}
+        strokeWidth={selected ? 2 : picked ? 1.5 : 1}
         dash={truss ? [4, 2] : undefined}
         strokeScaleEnabled={false}
         listening={editable}
@@ -191,13 +181,18 @@ function ItemNode({ item, view, editable, all }: { item: CadItem; view: FlatView
         }}
         onDragMove={(e) => {
           const n = e.target
-          const x = snap(n.x() + r.w / 2, r.w / 2, as, tol) - r.w / 2
-          let y = snap(n.y() + r.h / 2, r.h / 2, bs, tol) - r.h / 2
+          // Magnet on: edges and centres snap to other items (pink guides), else a 0.25 m grid.
+          const s = magnet ? snapRect({ x: n.x(), y: n.y(), w: r.w, h: r.h }, others, tol, { hLines: view === 'top' ? [] : [0] }) : { x: Math.round(n.x() * 100) / 100, y: Math.round(n.y() * 100) / 100, guides: [] }
+          let y = s.y
           if (view !== 'top') y = Math.min(y, -r.h) // nothing below the ground
           if (item.kind === 'deck' && view !== 'top') y = -r.h // decks stand on the ground
-          n.position({ x, y })
+          n.position({ x: s.x, y })
+          useGuides.getState().set(view, s.guides)
         }}
-        onDragEnd={(e) => commit({ x: e.target.x(), y: e.target.y(), w: r.w, h: r.h })}
+        onDragEnd={(e) => {
+          useGuides.getState().set(null, [])
+          commit({ x: e.target.x(), y: e.target.y(), w: r.w, h: r.h })
+        }}
         onTransformEnd={(e) => {
           const n = e.target
           const w = Math.max(0.1, Math.round(r.w * n.scaleX() * 4) / 4)

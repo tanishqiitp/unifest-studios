@@ -6,6 +6,7 @@ import { useStore } from '../store'
 import type { Decor } from '../types'
 import { DECOR } from '../lib/decor'
 import { useSnap, useView } from './PlanCanvas'
+import { clearGuides, topSnap } from './Align'
 
 // A decor, effect, branding or model item in the top view. x, y is its centre.
 export function DecorNode({ d, editable }: { d: Decor; editable: boolean }) {
@@ -41,9 +42,15 @@ export function DecorNode({ d, editable }: { d: Decor; editable: boolean }) {
           e.cancelBubble = true
           select({ kind: 'decor', id: d.id })
         }}
+        onDragMove={(e) => {
+          // Rotated pieces use their unrotated footprint, which is close enough for lining up.
+          const s = topSnap('decor', d.id, { x: e.target.x() - w / 2, y: e.target.y() - h / 2, w, h }, v.scale, 0.1)
+          e.target.position({ x: s.x + w / 2, y: s.y + h / 2 })
+        }}
         onDragEnd={(e) => {
-          const nx = snap(e.target.x(), 0.1)
-          const ny = snap(e.target.y(), 0.1)
+          clearGuides()
+          const nx = Math.round(e.target.x() * 100) / 100
+          const ny = Math.round(e.target.y() * 100) / 100
           e.target.position({ x: nx, y: ny })
           mutate((p) => {
             const t = p.decor!.find((x) => x.id === d.id)!

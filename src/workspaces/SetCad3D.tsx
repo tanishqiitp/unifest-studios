@@ -9,6 +9,7 @@ import type { Project, SetPiece } from '../types'
 import { setLine } from '../lib/setpieces'
 import { applyBox, CAD_EDITS, cadItems, type CadItem, type CadKind } from '../lib/cad'
 import { useTheme } from '../lib/theme'
+import { snapBox } from '../lib/snap'
 import { screenStats } from '../lib/calc'
 import { SetItems } from './Set3D'
 
@@ -145,8 +146,13 @@ function BoxHandle({ item, onDrag }: { item: CadItem; onDrag: (id: string | null
     const dx = o.position.x - c.x
     const dz = o.position.y - c.y
     const dy = o.position.z - c.z
-    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 0.001)
-      mutate((p) => applyBox(p, item.kind, item.id, b, { x0: b.x0 + dx, x1: b.x1 + dx, y0: b.y0 + dy, y1: b.y1 + dy, z0: b.z0 + dz, z1: b.z1 + dz }))
+    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 0.001) {
+      let nb = { x0: b.x0 + dx, x1: b.x1 + dx, y0: b.y0 + dy, y1: b.y1 + dy, z0: b.z0 + dz, z1: b.z1 + dz }
+      // Magnet on: line up with nearby items' edges and centres, sit on tops or the floor.
+      const { ui, project } = useStore.getState()
+      if (ui.magnet) nb = snapBox(nb, cadItems(project).filter((o) => !(o.kind === item.kind && o.id === item.id)).map((o) => o.box), 0.3)
+      mutate((p) => applyBox(p, item.kind, item.id, b, nb))
+    }
     setNonce((n) => n + 1)
     setMoving(false)
     onDrag(null)

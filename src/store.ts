@@ -9,6 +9,15 @@ import { nanoid } from 'nanoid'
 import { withSeating } from './lib/seating'
 import { syncSetMirrors } from './lib/setpieces'
 
+// Shift is tracked globally so every editor gets Shift+click multi-select through `select()`.
+let shiftHeld = false
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => (shiftHeld = e.shiftKey), true)
+  window.addEventListener('keyup', (e) => (shiftHeld = e.shiftKey), true)
+  window.addEventListener('pointerdown', (e) => (shiftHeld = e.shiftKey), true)
+  window.addEventListener('blur', () => (shiftHeld = false))
+}
+
 export type Selection = { kind: 'screen' | 'ground' | 'deck' | 'truss' | 'hoist' | 'fixture' | 'table' | 'decor' | 'comment' | 'set'; id: string } | null
 export type LedOverlay = 'none' | 'data' | 'power'
 export type Tool = 'select' | 'pan' | 'paint' | 'measure' | 'draw-truss' | 'hoist'
@@ -17,6 +26,8 @@ interface UI {
   workspace: Workspace
   mode: Mode
   selection: Selection
+  // More items picked with Shift+click, for align and distribute. The first pick stays in `selection`.
+  extra: NonNullable<Selection>[]
   tool: Tool
   magnet: boolean
   overlay: LedOverlay
@@ -75,6 +86,7 @@ export const useStore = create<State>()(
         workspace: 'ground',
         mode: 'simple',
         selection: null,
+        extra: [],
         tool: 'select',
         magnet: true,
         overlay: 'none',
@@ -101,10 +113,19 @@ export const useStore = create<State>()(
         withSeating(p)
         syncMirrors(p)
         syncSetMirrors(p)
-        set({ project: p, ui: { ...get().ui, selection: null } })
+        set({ project: p, ui: { ...get().ui, selection: null, extra: [] } })
       },
       setUI: (u) => set({ ui: { ...get().ui, ...u } }),
-      select: (selection) => set({ ui: { ...get().ui, selection } }),
+      select: (selection) => {
+        const ui = get().ui
+        // Shift+click adds to (or removes from) the selection instead of replacing it.
+        if (shiftHeld && selection && ui.selection && !(ui.selection.kind === selection.kind && ui.selection.id === selection.id)) {
+          const has = ui.extra.some((e) => e.kind === selection.kind && e.id === selection.id)
+          return set({ ui: { ...ui, extra: has ? ui.extra.filter((e) => !(e.kind === selection.kind && e.id === selection.id)) : [...ui.extra, selection] } })
+        }
+        if (shiftHeld && !selection && ui.extra.length) return
+        set({ ui: { ...ui, selection, extra: [] } })
+      },
       notify: (msg) => {
         clearTimeout(toastTimer)
         set({ ui: { ...get().ui, toast: msg } })

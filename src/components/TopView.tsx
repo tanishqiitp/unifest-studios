@@ -6,6 +6,7 @@ import type { GroundItem, Project, Table } from '../types'
 import { CHAIR, isSeated, seatPositions } from '../lib/seating'
 import { rigging, screenColumns, screenStats, TRUSS_INFO } from '../lib/calc'
 import { useSnap, useView } from './PlanCanvas'
+import { clearGuides, SnapGuides, topSnap } from './Align'
 import { DecorNode } from './DecorNode'
 
 export const GROUND_STYLE: Record<GroundItem['kind'], { fill: string; stroke: string; name: string; tip: string }> = {
@@ -54,6 +55,7 @@ export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sight
       {(p.decor ?? []).map((d) => (
         <DecorNode key={d.id} d={d} editable={edit === 'decor'} />
       ))}
+      <SnapGuides pane="home" />
       {p.fixtures.map((f) => (
         <Group
           key={f.id}
@@ -184,7 +186,6 @@ function DeckNode({ id, editable, dim }: { id: string; editable: boolean; dim: b
   const tool = useStore((s) => s.ui.tool)
   const v = useView()
   const { mutate, select } = useStore.getState()
-  const snap = useSnap()
   const selected = sel?.kind === 'deck' && sel.id === id
   const shade = Math.round(20 + Math.min(1, d.h / 2.5) * 40)
   return (
@@ -205,9 +206,11 @@ function DeckNode({ id, editable, dim }: { id: string; editable: boolean; dim: b
           e.cancelBubble = true
           select({ kind: 'deck', id })
         }}
+        onDragMove={(e) => e.target.position(topSnap('deck', id, { x: e.target.x(), y: e.target.y(), w: d.w, h: d.l }, v.scale, 0.25))}
         onDragEnd={(e) => {
-          const nx = snap(e.target.x())
-          const ny = snap(e.target.y())
+          clearGuides()
+          const nx = Math.round(e.target.x() * 100) / 100
+          const ny = Math.round(e.target.y() * 100) / 100
           e.target.position({ x: nx, y: ny })
           mutate((p) => {
             const t = p.decks.find((x) => x.id === id)!
