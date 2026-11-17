@@ -64,3 +64,34 @@ describe('saving', () => {
     expect(localStorage.getItem('unifest:damaged:broken')).toBe('{not json')
   })
 })
+
+describe('edit actions', () => {
+  it('duplicates, nudges, selects all and deletes several items in one undo step', async () => {
+    const A = await import('../actions')
+    const { useStore, undo } = S
+    const st = useStore.getState
+    st().setUI({ workspace: 'ground', home: false })
+    st().mutate((p) => {
+      p.ground = [
+        { id: 'g1', kind: 'crowd', x: 1, y: 1, w: 2, h: 2, rotation: 0, label: 'A' },
+        { id: 'g2', kind: 'foh', x: 5, y: 5, w: 2, h: 2, rotation: 0, label: 'B' },
+      ]
+    })
+    st().select({ kind: 'ground', id: 'g1' })
+    expect(A.duplicateSelection()).toBe(true)
+    expect(st().project.ground).toHaveLength(3)
+    const copy = st().project.ground[2]
+    expect([copy.x, copy.y]).toEqual([2, 2])
+    expect(st().ui.selection?.id).toBe(copy.id)
+    A.nudgeSelection(0.1, 0)
+    expect(st().project.ground[2].x).toBeCloseTo(2.1)
+    expect(A.selectAll()).toBe(true)
+    expect(1 + st().ui.extra.length).toBe(3)
+    const before = useStore.temporal.getState().pastStates.length
+    A.deleteSelection()
+    expect(st().project.ground).toHaveLength(0)
+    expect(useStore.temporal.getState().pastStates.length).toBe(before + 1)
+    undo()
+    expect(st().project.ground).toHaveLength(3)
+  })
+})

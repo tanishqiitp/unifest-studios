@@ -1,5 +1,5 @@
 import { useGlCreated } from '../components/Safe3D'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid, OrbitControls, PerformanceMonitor, TransformControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -21,11 +21,13 @@ import {
   Maximize2,
   Move3d,
   Rotate3d,
+  Redo2,
   Trash2,
+  Undo2,
   Ungroup,
   Unlock,
 } from 'lucide-react'
-import { useStore } from '../store'
+import { redo, undo, useStore } from '../store'
 import type { Part, PartArray, PartKind, Vec3 } from '../types'
 import { ASSEMBLIES, buildAssembly, childrenOf, duplicate, EXTRUDE_PRESETS, groupParts, LATHE_PRESETS, MAT_PRESETS, newPart, PART_KINDS, partArea, removeParts, ungroup } from '../lib/parts'
 import { setLine } from '../lib/setpieces'
@@ -351,6 +353,8 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
   const { setUI, notify } = useStore.getState()
   const name = useStore((s) => s.project.name)
   const bar = 'glass rounded-xl flex items-center gap-0.5 p-1'
+  const canUndo = useSyncExternalStore(useStore.temporal.subscribe, () => useStore.temporal.getState().pastStates.length > 0)
+  const canRedo = useSyncExternalStore(useStore.temporal.subscribe, () => useStore.temporal.getState().futureStates.length > 0)
   const b = (on: boolean) => `btn h-8 px-2 text-[11px] ${on ? 'btn-on' : ''}`
   const exportGlb = async () => {
     const r = root.current
@@ -377,6 +381,20 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
   }
   return (
     <div className="absolute top-3 left-3 right-3 z-10 flex sm:flex-wrap items-start gap-2 pointer-events-none max-sm:pointer-events-auto max-sm:overflow-x-auto no-scrollbar [&>*]:shrink-0">
+      <div className={`${bar} pointer-events-auto`}>
+        <button className={`${b(false)} disabled:opacity-30`} title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onClick={undo}>
+          <Undo2 size={13} />
+        </button>
+        <button className={`${b(false)} disabled:opacity-30`} title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onClick={redo}>
+          <Redo2 size={13} />
+        </button>
+        <button className={`${b(false)} disabled:opacity-30`} title="Duplicate (Shift+D)" aria-label="Duplicate selection" disabled={!m.sel.length} onClick={duplicateSel}>
+          <Copy size={13} />
+        </button>
+        <button className={`${b(false)} disabled:opacity-30 hover:text-err`} title="Delete (Del)" aria-label="Delete selection" disabled={!m.sel.length} onClick={deleteSel}>
+          <Trash2 size={13} />
+        </button>
+      </div>
       <div className={`${bar} pointer-events-auto`}>
         <button className={b(m.mode === 'translate')} title="Move (G)" onClick={() => m.set({ mode: 'translate' })}>
           <Move3d size={13} />

@@ -1,11 +1,12 @@
+import { deleteSelection, duplicateSelection, nudgeSelection, selectAll } from './lib/actions'
 import { SavePoints } from './components/SavePoints'
 import { exportProject } from './lib/export/files'
 import { loadSummary } from './lib/loads'
 import { AppCrash, ErrorBoundary, Safe3D } from './components/Safe3D'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
-import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Trash2, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useSave, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -29,7 +30,6 @@ import { Check, Modal, Num, Seg, Sel, Txt } from './components/ui'
 import { Home } from './components/Home'
 import { VenueFinder } from './components/VenueFinder'
 import { Guide } from './components/Guide'
-import { nanoid } from 'nanoid'
 import { briefToProject, parseBrief } from './lib/smartLayout'
 import { decorPreset, newDecor } from './lib/decor'
 import { useDevice, isCompact, type DevicePref } from './lib/device'
@@ -61,6 +61,8 @@ const TABS: { id: Workspace; label: string; short: string; kicker: string; icon:
   { id: 'plan', label: 'Plan', short: 'Plan', kicker: '09', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
   { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '10', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
 ]
+
+const EDIT_WS = ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor']
 
 // Number keys 1-9 open these, in order (the Model tab is opened by clicking).
 const KEYED = TABS.filter((t) => t.id !== 'model')
@@ -444,6 +446,30 @@ function Hud() {
   )
 }
 
+// Undo, redo, duplicate and delete as buttons, paired with Ctrl+Z, Ctrl+Shift+Z, Ctrl+D and Delete.
+export function EditButtons({ vertical }: { vertical?: boolean }) {
+  const canUndo = useSyncExternalStore(useStore.temporal.subscribe, () => useStore.temporal.getState().pastStates.length > 0)
+  const canRedo = useSyncExternalStore(useStore.temporal.subscribe, () => useStore.temporal.getState().futureStates.length > 0)
+  const count = useStore((s) => (s.ui.selection ? 1 + s.ui.extra.length : 0))
+  const b = 'btn btn-icon disabled:opacity-30 disabled:cursor-not-allowed'
+  return (
+    <div className={`flex ${vertical ? 'flex-col' : ''} gap-1`}>
+      <button className={b} title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onClick={undo}>
+        <Undo2 size={15} />
+      </button>
+      <button className={b} title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onClick={redo}>
+        <Redo2 size={15} />
+      </button>
+      <button className={b} title="Duplicate (Ctrl+D)" aria-label="Duplicate selection" disabled={!count} onClick={duplicateSelection}>
+        <Copy size={15} />
+      </button>
+      <button className={`${b} hover:text-err`} title={count > 1 ? `Delete ${count} items (Delete)` : 'Delete (Delete)'} aria-label="Delete selection" disabled={!count} onClick={deleteSelection}>
+        <Trash2 size={15} />
+      </button>
+    </div>
+  )
+}
+
 function ToolRail() {
   const ui = useStore((s) => s.ui)
   const { setUI } = useStore.getState()
@@ -464,6 +490,8 @@ function ToolRail() {
       <button className={`btn btn-icon ${ui.magnet ? 'btn-on' : ''}`} title="Magnet / smart snap (M)" onClick={() => setUI({ magnet: !ui.magnet })}>
         <Magnet size={15} />
       </button>
+      <div className="h-px bg-line mx-1" />
+      <EditButtons vertical />
     </div>
   )
 }
@@ -637,7 +665,12 @@ function Shortcuts() {
     ['+ / −', 'Zoom'],
     ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
     ['Ctrl+D', 'Duplicate selected screen'],
-    ['Delete', 'Delete selection'],
+    ['Delete', 'Delete selection (or the bin button)'],
+    ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo (also Ctrl+Y)'],
+    ['Ctrl+D', 'Duplicate selection'],
+    ['Ctrl+A', 'Select everything in this workspace'],
+    ['Arrow keys', 'Nudge 0.1 m (Shift: 1 m)'],
+    ['Esc', 'Deselect'],
     ['Ctrl+S', 'Save'],
     ['1 – 7', 'Switch workspace'],
   ]
@@ -660,7 +693,7 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return
-      const { ui, setUI, mutate, select, notify, project } = useStore.getState()
+      const { ui, setUI, mutate, select, notify } = useStore.getState()
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -668,12 +701,10 @@ function useShortcuts() {
       }
       if (mod && e.key.toLowerCase() === 'y') return (e.preventDefault(), redo())
       if (mod && e.key.toLowerCase() === 's') return (e.preventDefault(), notify(saveNow() ? 'Saved' : 'Could not save'))
-      if (mod && e.key.toLowerCase() === 'd' && ui.selection?.kind === 'screen') {
-        e.preventDefault()
-        const s = project.screens.find((x) => x.id === ui.selection!.id)
-        if (s) mutate((p) => void p.screens.push({ ...s, id: nanoid(8), name: `${s.name} COPY`, x: s.x + 1, mirrorOf: undefined }))
-        return
-      }
+      // Edit shortcuts work in the 2D workspaces; the 3D views have their own keys.
+      const editing = EDIT_WS.includes(ui.workspace) && !ui.home
+      if (mod && e.key.toLowerCase() === 'd' && editing) return (e.preventDefault(), duplicateSelection())
+      if (mod && e.key.toLowerCase() === 'a' && editing) return (e.preventDefault(), selectAll())
       if (mod) return
       const k = e.key.toLowerCase()
       if (k === 'v') setUI({ tool: 'select' })
@@ -684,22 +715,16 @@ function useShortcuts() {
       if (k === '?') setUI({ shortcutsOpen: true })
       if (k === 'escape') setUI({ tool: 'select' })
       if (/^[1-9]$/.test(k) && KEYED[Number(k) - 1]) setUI({ workspace: KEYED[Number(k) - 1].id, tool: 'select' })
-      if ((k === 'delete' || k === 'backspace') && ui.selection) {
-        const { kind, id } = ui.selection
-        mutate((p) => {
-          if (kind === 'screen') p.screens = p.screens.filter((s) => s.id !== id && s.mirrorOf !== id)
-          if (kind === 'ground') p.ground = p.ground.filter((g) => g.id !== id)
-          if (kind === 'deck') p.decks = p.decks.filter((d) => d.id !== id)
-          if (kind === 'truss') p.truss = p.truss.filter((t) => t.id !== id)
-          if (kind === 'hoist') p.hoists = p.hoists.filter((h) => h.id !== id)
-          if (kind === 'set') p.set = (p.set ?? []).filter((x) => x.id !== id && x.mirrorOf !== id)
-          if (kind === 'decor') p.decor = (p.decor ?? []).filter((x) => x.id !== id)
-          if (kind === 'table') {
-            p.tables = p.tables.filter((t) => t.id !== id)
-            p.guests.forEach((g) => g.tableId === id && (g.tableId = undefined))
-          }
-        })
-        select(null)
+      if ((k === 'delete' || k === 'backspace') && ui.selection && editing) return (e.preventDefault(), deleteSelection())
+      if (k === 'escape' && editing) select(null)
+      // Arrow keys nudge the selection: 0.1 m, or 1 m with Shift. In LED screens up/down change height.
+      const arrows: Record<string, [number, number]> = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] }
+      if (arrows[k] && ui.selection && editing) {
+        e.preventDefault()
+        const step = e.shiftKey ? 1 : 0.1
+        const [ax, ay] = arrows[k]
+        if (ui.workspace === 'led') nudgeSelection(ax * step, 0, -ay * step)
+        else nudgeSelection(ax * step, ay * step)
       }
       if (k === 'n' && ui.workspace === 'led') mutate((p) => void p.screens.push(newScreen(p)))
     }
