@@ -407,11 +407,6 @@ export function stageBounds(project: Project) {
 export function totals(project: Project) {
   const stats = project.screens.map((s) => screenStats(s, project.customPanels))
   const pl = pixelLayout(project)
-  const ledKg = stats.reduce((a, s) => a + s.weight, 0)
-  const trussKg = project.truss.reduce((a, t) => a + trussLength(t) * TRUSS_INFO[t.type].kgPerM, 0)
-  const fixKg = project.fixtures.reduce((a, f) => a + FIXTURE_INFO[f.kind].weight, 0)
-  const ledW = stats.reduce((a, s) => a + s.maxW, 0)
-  const fixW = project.fixtures.reduce((a, f) => a + FIXTURE_INFO[f.kind].watts, 0)
   const sb = stageBounds(project)
   const cap = audienceEstimate(project)
   return {
@@ -419,8 +414,6 @@ export function totals(project: Project) {
     pxH: pl.height,
     ledArea: stats.reduce((a, s) => a + s.area, 0),
     cabinets: stats.reduce((a, s) => a + s.cabinets, 0),
-    weight: ledKg + trussKg + fixKg,
-    powerKw: (ledW + fixW) / 1000,
     stage: sb ? `${fmt(sb.w)} × ${fmt(sb.l)} m` : '—',
     capacity: cap.estimate,
     capacityStatus: cap.status,

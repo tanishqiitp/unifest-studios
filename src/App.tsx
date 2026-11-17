@@ -1,3 +1,4 @@
+import { loadSummary } from './lib/loads'
 import { AppCrash, ErrorBoundary, Safe3D } from './components/Safe3D'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CompanyPanel } from './components/SiteSections'
@@ -410,13 +411,14 @@ function MenuItem({ icon, label, hint, onClick }: { icon: React.ReactNode; label
 function Hud() {
   const project = useStore((s) => s.project)
   const t = totals(project)
+  const ls = loadSummary(project)
   // [label, value, shown only on wide screens]
   const items: [string, string, boolean?][] = [
     ['Total pixels', `${t.pxW} × ${t.pxH}`],
     ['LED area', `${fmt(t.ledArea, 1)} m²`, true],
     ['Stage', t.stage, true],
-    ['Weight', `${Math.round(t.weight).toLocaleString('en-IN')} kg`],
-    ['Power', `${fmt(t.powerKw, 1)} kW`],
+    ['Weight', `${Math.round(ls.weightKg).toLocaleString('en-IN')} kg`],
+    ['Power max', `${fmt(ls.continuousMaxW / 1000, 1)} kW`],
     ['Space est.', t.capacityStatus === 'ok' ? `~${t.capacity.toLocaleString('en-IN')}` : t.capacityStatus === 'check' ? 'unverified' : '—', true],
     ...(project.tables.length ? ([['Seats', seatCount(project).toLocaleString('en-IN')]] as [string, string][]) : []),
   ]
@@ -424,7 +426,7 @@ function Hud() {
   const device = useDevice((s) => s.kind)
   const left = device !== 'desktop' ? 'left-3' : ws === 'led' || ws === 'ground' || ws === 'stage' || ws === 'truss' || ws === 'seating' || ws === 'decor' || ws === 'set' ? 'left-[272px]' : 'left-4'
   // Phones show the three most useful numbers only.
-  const shown = device === 'phone' ? items.filter(([k]) => k === 'Total pixels' || k === 'Weight' || k === 'Power') : items
+  const shown = device === 'phone' ? items.filter(([k]) => k === 'Total pixels' || k === 'Weight' || k === 'Power max') : items
   return (
     <div className={`absolute top-4 ${left} z-10 glass rounded-xl flex divide-x divide-line pointer-events-none`}>
       {shown.map(([k, v, wide]) => (

@@ -1,5 +1,5 @@
 import type { Project } from '../../types'
-import { FIXTURE_INFO, portMap, powerPlan, screenStats, stockPieces, trussLength, TRUSS_INFO } from '../calc'
+import { fmt, FIXTURE_INFO, portMap, powerPlan, screenStats, stockPieces, trussLength, TRUSS_INFO } from '../calc'
 
 export interface EquipRow {
   category: string
@@ -40,13 +40,13 @@ export function equipmentList(p: Project): EquipRow[] {
   for (const t of p.truss) {
     const info = TRUSS_INFO[t.type]
     for (const len of stockPieces(trussLength(t))) add('Truss', `${info.name} ${len} m`, 1, 'pcs', len * info.kgPerM)
-    if (t.legs) add('Truss', `Ground-support tower ${t.height} m`, 2, 'pcs', 2 * (t.height * info.kgPerM + 60))
+    if (t.legs) add('Truss', `Ground-support tower ${fmt(t.height, 2)} m`, 2, 'pcs', 2 * (t.height * info.kgPerM + 60))
   }
   const corners = p.truss.length > 1 ? p.truss.length : 0
   if (corners) add('Truss', 'Corner / junction block', corners, 'pcs', corners * 6)
   for (const h of p.hoists) add('Rigging', `Chain hoist ${h.capacity} kg`, 1, 'pcs', 45, 1500)
 
-  for (const d of p.decks) add('Stage', `Stage deck ${d.w}×${d.l} m`, 1, 'pcs', d.w * d.l * 25)
+  for (const d of p.decks) add('Stage', `Stage deck ${fmt(d.w, 2)}×${fmt(d.l, 2)} m`, 1, 'pcs', d.w * d.l * 25)
 
   for (const f of p.fixtures) add(f.kind === 'line-array' || f.kind === 'sub' ? 'Sound' : 'Lighting', FIXTURE_INFO[f.kind].name, 1, 'pcs', FIXTURE_INFO[f.kind].weight, FIXTURE_INFO[f.kind].watts)
 
@@ -58,9 +58,4 @@ export function equipmentList(p: Project): EquipRow[] {
   return rows
 }
 
-export function equipmentCSV(p: Project) {
-  const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
-  const head = ['Category', 'Item', 'Qty', 'Unit', 'Weight (kg)', 'Power (W)']
-  const lines = equipmentList(p).map((r) => [r.category, r.item, r.qty, r.unit, Math.round(r.weightKg), Math.round(r.powerW)].map(esc).join(','))
-  return [head.map(esc).join(','), ...lines].join('\r\n')
-}
+// The equipment CSV lives in ../loads.ts so it can include decor, set pieces and the shared totals.

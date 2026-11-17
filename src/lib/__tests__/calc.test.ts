@@ -1,3 +1,4 @@
+import { loadSummary } from '../loads'
 import { describe, expect, it } from 'vitest'
 import type { Project, Screen } from '../../types'
 import { allowableLoad, autoRig, cableOrder, circuitsFor, pixelLayout, portMap, powerPlan, rigging, screenColumns, screenStats, stockPieces, totals } from '../calc'
@@ -157,6 +158,6 @@ describe('Ground plan', () => {
     const t = totals(p)
     expect(t.pxW).toBe(2048)
     expect(t.cabinets).toBe(64)
-    expect(t.powerKw).toBeCloseTo(9.6, 6)
+    expect(loadSummary(p).ledMaxW / 1000).toBeCloseTo(9.6, 6)
   })
 })

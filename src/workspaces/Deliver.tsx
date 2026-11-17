@@ -4,7 +4,7 @@ import { Box, Copy, FileCode2, FileDown, FileJson, FileSpreadsheet, FileText, Im
 import { useStore } from '../store'
 import { fmt, pixelLayout, totals } from '../lib/calc'
 import { download, exportDXF, exportPixelMap, exportProject, exportResolume, pixelMapCanvas, shareLink, slug } from '../lib/export/files'
-import { equipmentCSV } from '../lib/export/equipment'
+import { equipmentCSV, loadSummary } from '../lib/loads'
 import { seatingCSV } from '../lib/seating'
 import { cloudEnabled, ensureShare, shortLink, useAuth } from '../lib/cloud'
 
@@ -12,6 +12,7 @@ export function DeliverWorkspace() {
   const project = useStore((s) => s.project)
   const { notify, setUI } = useStore.getState()
   const t = totals(project)
+  const ls = loadSummary(project)
   const pl = pixelLayout(project)
   const user = useAuth((a) => a.user)
   const [code, setCode] = useState<string | null>(null)
@@ -59,8 +60,8 @@ export function DeliverWorkspace() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Kpi label="Pixels" value={`${t.pxW}×${t.pxH}`} />
             <Kpi label="LED area" value={`${fmt(t.ledArea, 1)} m²`} />
-            <Kpi label="Weight" value={`${Math.round(t.weight)} kg`} />
-            <Kpi label="Power" value={`${fmt(t.powerKw, 1)} kW`} />
+            <Kpi label="Equipment weight" value={`${Math.round(ls.weightKg).toLocaleString('en-IN')} kg`} />
+            <Kpi label="Power, max" value={`${fmt(ls.continuousMaxW / 1000, 1)} kW`} />
           </div>
         </div>
 

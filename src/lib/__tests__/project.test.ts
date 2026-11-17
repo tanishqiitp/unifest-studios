@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { generateProject, TEMPLATES } from '../templates'
 import { getWarnings } from '../warnings'
-import { equipmentCSV, equipmentList } from '../export/equipment'
+import { equipmentList } from '../export/equipment'
+import { equipmentCSV, loadSummary } from '../loads'
 import { dxfString, readShareHash, resolumeXml, shareLink } from '../export/files'
 import { deleteProject, loadCurrent, readLibrary, readProject, writeProject } from '../library'
 
@@ -112,6 +113,21 @@ describe('Exports', () => {
     expect(led.reduce((a, r) => a + r.qty, 0)).toBe(cabinets)
     const csv = equipmentCSV(p)
     expect(csv.split('\n')[0]).toMatch(/Category/i)
+  })
+
+  it('CSV rows add up to the same totals the dashboard shows', () => {
+    const ls = loadSummary(p)
+    const csv = equipmentCSV(p).split('\r\n')
+    const rows = csv.slice(1, csv.indexOf(''))
+    const cells = (l: string) => l.split('","').map((c) => c.replace(/^"|"$/g, ''))
+    const weight = rows.reduce((a, l) => a + Number(cells(l)[5] || 0), 0)
+    const cont = rows.filter((l) => cells(l)[8] === 'Continuous').reduce((a, l) => a + Number(cells(l)[7] || 0), 0)
+    expect(Math.abs(weight - ls.weightKg)).toBeLessThan(1)
+    expect(Math.abs(cont - ls.continuousMaxW)).toBeLessThan(1)
+    expect(ls.weightKg).toBeCloseTo(ls.trussLoadKg + ls.groundKg, 6)
+    // Hoist motors are listed but never added to the continuous total.
+    expect(csv.some((l) => l.includes('Hoist motors'))).toBe(true)
+    expect(csv.join('\n')).not.toMatch(/\d\.\d{6,}/)
   })
 })
 

@@ -3,7 +3,7 @@ import { autoTable } from 'jspdf-autotable'
 import type { Project } from '../../types'
 import { fmt, pixelLayout, portMap, powerPlan, rigging, screenColumns, screenStats, totals, TRUSS_INFO, VOLTS } from '../calc'
 import { getWarnings } from '../warnings'
-import { equipmentList } from './equipment'
+import { loadSummary } from '../loads'
 import { pixelMapCanvas, slug } from './files'
 import { GROUND_LABELS } from './labels'
 
@@ -105,6 +105,7 @@ export function exportTechnicalPDF(p: Project) {
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const t = totals(p)
+  const ls = loadSummary(p)
 
   // Cover
   doc.setFillColor(0, 0, 0)
@@ -124,8 +125,8 @@ export function exportTechnicalPDF(p: Project) {
     ['LED area', `${fmt(t.ledArea, 1)} m²`],
     ['Cabinets', String(t.cabinets)],
     ['Stage', t.stage],
-    ['Total weight', `${Math.round(t.weight)} kg`],
-    ['Power (max)', `${fmt(t.powerKw, 1)} kW`],
+    ['Equipment weight', `${Math.round(ls.weightKg).toLocaleString('en-IN')} kg`],
+    ['Power (max, continuous)', `${fmt(ls.continuousMaxW / 1000, 1)} kW`],
     ['Space estimate', t.capacityStatus === 'ok' ? `~${t.capacity.toLocaleString('en-IN')} ppl` : t.capacityStatus === 'check' ? 'Unverified' : 'Not estimated'],
   ]
   kpis.forEach(([k, v], i) => {
@@ -227,7 +228,10 @@ export function exportTechnicalPDF(p: Project) {
     ...tableStyle,
     startY: 24,
     head: [['Category', 'Item', 'Qty', 'Unit', 'Weight', 'Power']],
-    body: equipmentList(p).map((r) => [r.category, r.item, r.qty, r.unit, r.weightKg ? `${Math.round(r.weightKg)} kg` : '', r.powerW ? `${Math.round(r.powerW)} W` : '']),
+    body: ls.rows.map((r) => [r.category, r.item, r.qty, r.unit, r.weightKg ? `${Math.round(r.weightKg)} kg` : '', r.powerW ? `${Math.round(r.powerW)} W${/hoist/i.test(r.item) ? ' (motor)' : ''}` : '']),
+    foot: [
+      ['Totals', `Weight ${Math.round(ls.weightKg)} kg (truss ${Math.round(ls.trussLoadKg)} · ground ${Math.round(ls.groundKg)})`, '', '', `Continuous max ${fmt(ls.continuousMaxW / 1000, 1)} kW`, `Motors ${fmt(ls.motorW / 1000, 1)} kW`],
+    ],
   })
   const w = getWarnings(p)
   autoTable(doc, {
