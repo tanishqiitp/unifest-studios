@@ -3,7 +3,7 @@ import { deleteSelection, duplicateSelection, nudgeSelection, selectAll } from '
 import { SavePoints } from './components/SavePoints'
 import { exportProject } from './lib/export/files'
 import { loadSummary } from './lib/loads'
-import { AppCrash, ErrorBoundary, Safe3D } from './components/Safe3D'
+import { AppCrash, ErrorBoundary, retryImport, Safe3D } from './components/Safe3D'
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
@@ -36,9 +36,9 @@ import { decorPreset, newDecor } from './lib/decor'
 import { useDevice, isCompact, type DevicePref } from './lib/device'
 
 // The 3D engine is large, so it loads only when someone opens a 3D view.
-const Viz3DWorkspace = lazy(() => import('./workspaces/Viz3D').then((m) => ({ default: m.Viz3DWorkspace })))
-const ModelWorkspace = lazy(() => import('./workspaces/Model').then((m) => ({ default: m.ModelWorkspace })))
-const Viewer = lazy(() => import('./workspaces/Viz3D').then((m) => ({ default: m.Viewer })))
+const Viz3DWorkspace = lazy(() => retryImport(() => import('./workspaces/Viz3D')).then((m) => ({ default: m.Viz3DWorkspace })))
+const ModelWorkspace = lazy(() => retryImport(() => import('./workspaces/Model')).then((m) => ({ default: m.ModelWorkspace })))
+const Viewer = lazy(() => retryImport(() => import('./workspaces/Viz3D')).then((m) => ({ default: m.Viewer })))
 
 function Loading3D() {
   return (

@@ -89,8 +89,35 @@
 - Store selectors returned a fresh empty list (`?? []`), which could freeze a view in an endless re-render. This affected Model saved views and Set Design on projects with no set pieces.
 - `newPart` defaults for curves were overwritten by later fields.
 
+## Independent code review (and what was fixed)
+A separate reviewer read the whole branch and found 13 issues. All of them are fixed, with tests where possible:
+
+- **Quote:** scattered flowers had inflated the mandap's quote by about 68 t, because their size variation was read as growth per copy. They are now counted at their real size, and copies are capped the way the 3D view draws them.
+- **Sculpt %** tore boxes, caps and extruded shapes apart at their edges. It now uses welded normals, and every shape type measures a 0 mm seam gap.
+- **Scatter:**
+  - Moving or rotating a scatter part pushed its flowers the wrong way. Copies now always stay on the surface.
+  - There are no move handles for scatter parts.
+  - A scatter part with no surface shows one part instead of 200 stacked ones.
+- **Curved ribbons and walls** were inside-out. They're now wound outwards, and a test checks the enclosed volume is positive.
+- **Render:**
+  - It now looks exactly like the live view, with the same colour grading.
+  - Every temporary change is undone even if it fails.
+  - Big floors no longer cast shadows.
+- **Rebuilds:** every edit used to rebuild every part's geometry. Now only the part whose shape changed is rebuilt; a colour edit on the mandap rebuilt 0 of 20 parts.
+- **Sculpting:**
+  - The brush outline works only over the 3D view, at most once per frame.
+  - Touch strokes end on cancel.
+  - `[` and `]` are ignored while typing.
+  - Relief deeper than a thin panel is kept when saving (new save format; old saves still open).
+- **Undo:** merging by press now also releases on key presses, window blur and mouse moves with no button held.
+- **Stage fit:** delay screens far down the venue are left alone, and side screens are pushed away from the stage centre.
+- **Small fixes:**
+  - children of arrayed parts no longer fight over selection registration;
+  - drapes no longer show controls that don't apply to them;
+  - lazily loaded 3D views retry a failed download, so "Try again" recovers.
+
 ## Checks run
-- **Tests:** 147 automated tests pass. New tests cover sculpt storage, brushes, the fast normals, cut-outs, curves, ribbon ends, cage, drapes, the assemblies and arrays.
+- **Tests:** 156 automated tests pass. New tests cover sculpt storage, brushes, the fast normals, cut-outs, curves, ribbon ends, cage, drapes, the assemblies and arrays.
 - **Type check and build:** type check and production build are clean.
 - **Browser (dev build):**
   - every section opens with no errors;

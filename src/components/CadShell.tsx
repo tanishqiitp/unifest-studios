@@ -1,4 +1,4 @@
-import { Safe3D } from './Safe3D'
+import { retryImport, Safe3D } from './Safe3D'
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { real } from '../lib/theme'
 import { Arrow, Group, Line, Rect, Text, Transformer } from 'react-konva'
@@ -8,7 +8,7 @@ import { useStore } from '../store'
 import { PlanCanvas, useView } from './PlanCanvas'
 import { applyBox, CAD_EDITS, cadItems, fromRect, toRect, type CadItem, type FlatView } from '../lib/cad'
 // The 3D pane (three.js) loads only when a 3D view is opened, keeping the first page load light.
-const SetCad3D = lazy(() => import('../workspaces/SetCad3D').then((m) => ({ default: m.SetCad3D })))
+const SetCad3D = lazy(() => retryImport(() => import('../workspaces/SetCad3D')).then((m) => ({ default: m.SetCad3D })))
 import { AlignBar, SnapGuides, useGuides } from './Align'
 import { snapRect } from '../lib/snap'
 
