@@ -763,7 +763,8 @@ function Gizmo() {
   const obj = active ? objs[active] : undefined
   const start = useRef<Map<string, { p: THREE.Vector3; r: THREE.Euler; s: THREE.Vector3 }>>(new Map())
   const sculpting = useSculpt((s) => s.on)
-  if (!part || !obj || part.locked || !obj.parent || (sculpting && part.kind === 'sculpt')) return null
+  // No move handles while sculpting, or on scattered copies (they always sit on their parent's surface).
+  if (!part || !obj || part.locked || !obj.parent || (sculpting && part.kind === 'sculpt') || part.array?.mode === 'surface') return null
   const snapshot = () => {
     start.current = new Map(sel.filter((id) => objs[id]).map((id) => [id, { p: objs[id].position.clone(), r: objs[id].rotation.clone(), s: objs[id].scale.clone() }]))
   }
@@ -939,7 +940,7 @@ function Props({ p }: { p: Part }) {
           )}
           {p.kind === 'text' && <Text3dToggle p={p} />}
           {(p.kind === 'lathe' || p.kind === 'extrude') && <ProfileEditor p={p} />}
-          {p.kind !== 'plane' && p.kind !== 'text' && <CageEditor p={p} />}
+          {p.kind !== 'plane' && p.kind !== 'text' && p.kind !== 'drape' && <CageEditor p={p} />}
           {(p.kind === 'box' || p.kind === 'extrude') && (
             <>
               <Sel
@@ -964,13 +965,13 @@ function Props({ p }: { p: Part }) {
               )}
             </>
           )}
-          {p.kind !== 'plane' && p.kind !== 'text' && (
+          {p.kind !== 'plane' && p.kind !== 'text' && p.kind !== 'drape' && (
             <div className="grid grid-cols-2 gap-2">
               <Num label="Taper (top size)" value={p.taper ?? 1} onChange={(taper) => up({ taper: Math.max(0, Math.min(3, taper)) })} step={0.05} tip="1 = straight sides, 0.5 = half as wide at the top (angled towers), 0 = a point." />
               <Num label="Twist" value={p.twist ?? 0} onChange={(twist) => up({ twist: Math.max(-720, Math.min(720, twist)) })} unit="°" step={15} tip="Turn the top relative to the bottom: twisted columns and flowing forms." />
             </div>
           )}
-          {p.kind !== 'plane' && p.kind !== 'text' && (
+          {p.kind !== 'plane' && p.kind !== 'text' && p.kind !== 'drape' && (
             <div className="grid grid-cols-3 gap-2">
               <Num label="Bend" value={p.bend ?? 0} onChange={(bend) => up({ bend: Math.max(-359, Math.min(359, bend)) })} unit="°" step={15} tip="Curl the width into an arc: 180° turns a flat ribbon into a standing arch; negative curls upwards." />
               <Num label="Sculpt" value={Math.round((p.organic ?? 0) * 100)} onChange={(o) => up({ organic: Math.max(0, Math.min(100, o)) / 100 })} unit="%" step={5} tip="Smooth sculpted bumps over the surface, for organic forms. Works best on spheres and big boxes." />

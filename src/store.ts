@@ -158,8 +158,13 @@ let pressHeld = false
 let lastPress = -1
 if (typeof window !== 'undefined') {
   window.addEventListener('pointerdown', () => ((press += 1), (pressHeld = true)), true)
-  window.addEventListener('pointerup', () => (pressHeld = false), true)
-  window.addEventListener('pointercancel', () => (pressHeld = false), true)
+  const release = () => (pressHeld = false)
+  window.addEventListener('pointerup', release, true)
+  window.addEventListener('pointercancel', release, true)
+  // Some popups (native selects) and alt-tab swallow the pointerup; don't let later edits merge into one step.
+  window.addEventListener('pointermove', (e) => e.buttons === 0 && release(), true)
+  window.addEventListener('keydown', release, true)
+  window.addEventListener('blur', release)
 }
 function mergeWithLast() {
   if (typeof document === 'undefined') return false

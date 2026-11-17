@@ -96,7 +96,10 @@ export function stageFit(p: Project): StageFit | null {
   const changes: string[] = []
   const mirrored = new Set(p.screens.map((s) => s.mirrorOf).filter(Boolean))
   // Main screens: not mirrored and not mirroring, with their centre over the stage's width (plus 2 m).
-  const main = p.screens.filter((s) => !s.mirrorOf && !mirrored.has(s.id) && s.x + width(s, p) / 2 > sb.x - 2 && s.x + width(s, p) / 2 < sb.x + sb.w + 2)
+  const near = (s: Screen) => s.y >= sb.y - 3 && s.y <= sb.y + sb.l + 3
+  // Main screens: not mirrored and not mirroring, over the stage (within its width + 2 m, and near it in depth,
+  // so delay screens further down the venue are left alone).
+  const main = p.screens.filter((s) => !s.mirrorOf && !mirrored.has(s.id) && near(s) && s.x + width(s, p) / 2 > sb.x - 2 && s.x + width(s, p) / 2 < sb.x + sb.w + 2)
   let shift = 0
   if (main.length) {
     const lo = Math.min(...main.map((s) => s.x))
@@ -107,7 +110,6 @@ export function stageFit(p: Project): StageFit | null {
   }
   // Side screens (mirror pairs): if either screen of a pair now overlaps the stage, move the pair outwards
   // together (the mirror follows its source across the venue centre line).
-  const near = (s: Screen) => s.y >= sb.y - 3 && s.y <= sb.y + sb.l + 3
   const intrusion = (s: Screen) => {
     const w = width(s, p)
     if (!near(s) || s.x >= sb.x + sb.w + 0.5 || s.x + w <= sb.x - 0.5) return 0
@@ -119,7 +121,8 @@ export function stageFit(p: Project): StageFit | null {
       const m = p.screens.find((x) => x.mirrorOf === s.id)
       const d = r2(Math.max(intrusion(s), m ? intrusion(m) : 0))
       if (d <= 0.05) return null
-      const outward = s.x + width(s, p) / 2 < p.venue.w / 2 ? -1 : 1
+      // Same reference as the overlap test: away from the stage centre.
+      const outward = s.x + width(s, p) / 2 < cx ? -1 : 1
       return { id: s.id, name: s.name, x: r2(s.x + outward * d) }
     })
     .filter((m): m is { id: string; name: string; x: number } => !!m)

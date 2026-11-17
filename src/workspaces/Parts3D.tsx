@@ -1,3 +1,4 @@
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { fontState, requestFont, subscribeFont, text3dGeometry } from '../lib/text3d'
 import { applyCage, hasCage } from '../lib/cage'
 import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js'
@@ -28,6 +29,28 @@ export type Shading = 'solid' | 'material' | 'wire' | 'xray'
 // Sculpting, applied on build so every value stays editable: an organic surface (smooth bumps pushed along the
 // surface normal), taper and twist along the height, and bend, which curls the width into an arc.
 const tween = (a: number, b: number, t: number) => a + (b - a) * t
+function weldedNormals(g: THREE.BufferGeometry): THREE.BufferAttribute {
+  const pos = g.getAttribute('position') as THREE.BufferAttribute
+  const plain = new THREE.BufferGeometry()
+  plain.setAttribute('position', pos.clone())
+  if (g.index) plain.setIndex(g.index.clone())
+  const welded = mergeVertices(plain, 1e-4)
+  welded.computeVertexNormals()
+  const wp = welded.getAttribute('position')
+  const wn = welded.getAttribute('normal')
+  const key = (x: number, y: number, z: number) => `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`
+  const byPos = new Map<string, number>()
+  for (let i = 0; i < wp.count; i++) byPos.set(key(wp.getX(i), wp.getY(i), wp.getZ(i)), i)
+  const out = new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3)
+  for (let i = 0; i < pos.count; i++) {
+    const j = byPos.get(key(pos.getX(i), pos.getY(i), pos.getZ(i)))
+    if (j !== undefined) out.setXYZ(i, wn.getX(j), wn.getY(j), wn.getZ(j))
+  }
+  plain.dispose()
+  welded.dispose()
+  return out
+}
+
 // Smooth repeatable 3D noise from layered sines: no dependency, same result for the same seed.
 function ripple(x: number, y: number, z: number, s: number) {
   return (
@@ -49,7 +72,10 @@ function cutPanel(p: Part, outline: [number, number][], bev: number) {
 }
 
 function sculptGeometry(p: Part) {
-  const g = sculptBase(p.base ?? 'sphere', p.res ?? 'medium').clone()
+  const base = sculptBase(p.base ?? 'sphere', p.res ?? 'medium')
+  const g = base.clone()
+  // Share the base's index: it never changes, and the brush's neighbour tables are cached on it.
+  g.setIndex(base.getIndex())
   const pos = g.getAttribute('position') as THREE.BufferAttribute
   const saved = p.sculpt ? decodeSculpt(p.sculpt, [p.w, p.h, p.d], pos.count) : null
   if (saved) pos.array.set(saved)
@@ -76,8 +102,9 @@ export function partGeometry(p: Part): THREE.BufferGeometry | null {
   const y0 = box.min.y
   const span = Math.max(1e-6, box.max.y - y0)
   if (organic) {
-    if (!g.getAttribute('normal')) g.computeVertexNormals()
-    const nrm = g.getAttribute('normal') as THREE.BufferAttribute
+    // Push along normals averaged over points at the same spot, so edges and seams (boxes, caps, extrudes)
+    // move together and the surface never tears open.
+    const nrm = weldedNormals(g)
     const size = Math.max(0.05, Math.min(p.w, p.h, p.d))
     const amp = (p.organic ?? 0) * size * 0.5
     const f = 2.4 / Math.max(0.2, Math.max(p.w, p.h, p.d) * 0.35)
@@ -343,20 +370,27 @@ export function PartsScene({
   )
 }
 
+// The fields that decide a part's shape (not its place, colour or name), for rebuilding only when needed.
+function geoKey(p: Part) {
+  return JSON.stringify([p.kind, p.w, p.h, p.d, p.seg, p.bevel, p.steps, p.arc, p.thick, p.profile, p.text, p.taper, p.twist, p.bend, p.organic, p.seed, p.base, p.res, p.holes, p.plane, p.closed, p.form, p.swags, p.sag, p.cage, p.solid, p.array?.mode === 'surface'])
+}
+
 // Copies of a part: its own array, or along its parent curve.
 function copiesOf(p: Part, all: Part[]) {
   const parent = p.array?.mode === 'path' ? all.find((x) => x.id === p.parent && x.kind === 'path') : undefined
   return instances(p, parent ? (n) => alongCurve(parent, p, n) : undefined)
 }
 
-function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: boolean }) {
+function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean; root?: boolean; copy?: number }) {
   const ctx = useContext(PartsCtx)!
   // 3D letters: ask for the font, and rebuild once it has arrived.
   const fontReady = useSyncExternalStore(subscribeFont, fontState)
   useEffect(() => void (p.kind === 'text' && p.solid && requestFont()), [p.kind, p.solid])
   // Scattered copies are small and many: build them with fewer sides (detail they would not show anyway),
   // so hundreds of flowers stay light on ordinary laptops.
-  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [p, fontReady]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Rebuilt only when the shape itself changes (not on moves, renames, colour or other parts' edits).
+  const gk = geoKey(p)
+  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [gk, p.sculpt, fontReady]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => geo?.dispose(), [geo])
   const mat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
   // Alternating copies share one second material in the alternate colour.
@@ -371,11 +405,12 @@ function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: b
   const kids = childrenOf(ctx.all, p.id)
   // Scatter: copies spread over the parent's surface, drawn as one instanced batch.
   const surface = p.array?.mode === 'surface' ? ctx.all.find((x) => x.id === p.parent && x.kind !== 'group') : undefined
-  const scatter = useMemo(() => (surface && p.array ? scatterMatrices(surface, p) : null), [surface, p])
+  const sk = surface && p.array ? `${geoKey(surface)}|${surface.sculpt?.length ?? 0}|${JSON.stringify([p.pos, p.rot, p.scl, p.array, p.seed])}` : ''
+  const scatter = useMemo(() => (surface && p.array ? scatterMatrices(surface, p) : null), [sk]) // eslint-disable-line react-hooks/exhaustive-deps
   if (p.hidden) return null
   if (scatter && geo)
     return (
-      <group ref={mirrored || !ctx.register ? undefined : (o) => ctx.register!(p.id, o)} userData={{ partId: p.id, root }}>
+      <group ref={mirrored || !ctx.register || copy > 0 ? undefined : (o) => ctx.register!(p.id, o)} position={toThree(p.pos)} rotation={rotToThree(p.rot)} scale={toThree(p.scl)} userData={{ partId: p.id, root }}>
         <Scattered geo={geo} mat={mat} alt={altMat} data={scatter} shadows={ctx.shadows} onPick={ctx.onPick && !mirrored ? (e) => (e.stopPropagation(), ctx.onPick!(p.id, e)) : undefined} />
       </group>
     )
@@ -383,7 +418,7 @@ function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: b
   const sel = !mirrored && ctx.selected?.has(p.id)
   return (
     <group
-      ref={mirrored || !ctx.register ? undefined : (o) => ctx.register!(p.id, o)}
+      ref={mirrored || !ctx.register || copy > 0 ? undefined : (o) => ctx.register!(p.id, o)}
       position={toThree(p.pos)}
       rotation={rotToThree(p.rot)}
       scale={toThree(p.scl)}
@@ -410,7 +445,7 @@ function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: b
             )}
             {sel && geo && i === 0 && <SelOutline geo={geo} />}
             {kids.map((k) => (
-              <PartNode key={k.id} p={k} mirrored={mirrored} />
+              <PartNode key={k.id} p={k} mirrored={mirrored} copy={Math.max(copy, i)} />
             ))}
           </group>
         </group>
@@ -431,7 +466,10 @@ function scatterMatrices(surface: Part, p: Part): THREE.Matrix4[] | null {
   ;(sampler as unknown as { setRandomGenerator: (f: () => number) => void }).setRandomGenerator(rnd)
   sampler.build()
   const n = Math.max(1, Math.min(1500, Math.round(p.array!.count)))
-  const own = new THREE.Vector3(...toThree(p.pos))
+  // Samples are in the surface's space; copies live inside the scatter part, so undo the part's own transform.
+  const own = new THREE.Matrix4()
+    .compose(new THREE.Vector3(...toThree(p.pos)), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotToThree(p.rot))), new THREE.Vector3(...toThree(p.scl)))
+    .invert()
   const pos = new THREE.Vector3()
   const nrm = new THREE.Vector3()
   const up = new THREE.Vector3(0, 1, 0)
@@ -443,7 +481,7 @@ function scatterMatrices(surface: Part, p: Part): THREE.Matrix4[] | null {
     const q = new THREE.Quaternion().setFromUnitVectors(up, nrm.normalize())
     q.multiply(new THREE.Quaternion().setFromAxisAngle(up, rnd() * spin))
     const s = 1 - vary + rnd() * vary * 2
-    out.push(new THREE.Matrix4().compose(pos.clone().sub(own), q, new THREE.Vector3(s, s, s)))
+    out.push(own.clone().multiply(new THREE.Matrix4().compose(pos, q, new THREE.Vector3(s, s, s))))
   }
   if (g !== src) g.dispose()
   src.dispose()
@@ -464,7 +502,17 @@ function Scattered({ geo, mat, data, shadows, onPick }: { geo: THREE.BufferGeome
 
 const outlineMat = new THREE.LineBasicMaterial({ color: '#ff9a1f', depthTest: false, transparent: true, opacity: 0.9 })
 function SelOutline({ geo }: { geo: THREE.BufferGeometry }) {
-  const edges = useMemo(() => new THREE.EdgesGeometry(geo, 25), [geo])
+  // Dense meshes (sculpts, organic shapes) get a bounding box instead of every hard edge.
+  const edges = useMemo(() => {
+    if (geo.getAttribute('position').count <= 20000) return new THREE.EdgesGeometry(geo, 25)
+    geo.computeBoundingBox()
+    const b = geo.boundingBox!
+    const box = new THREE.BoxGeometry(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z)
+    box.translate((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2)
+    const e = new THREE.EdgesGeometry(box)
+    box.dispose()
+    return e
+  }, [geo])
   useEffect(() => () => edges.dispose(), [edges])
   return <lineSegments geometry={edges} material={outlineMat} renderOrder={10} userData={{ helper: true }} />
 }

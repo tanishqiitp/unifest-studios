@@ -52,7 +52,8 @@ export function curveGeometry(p: Part): THREE.BufferGeometry | null {
     const b = ring(i + 1)
     for (let k = 0; k < 4; k++) {
       const k2 = (k + 1) % 4
-      idx.push(a + k, b + k, b + k2, a + k, b + k2, a + k2)
+      // Wound so the outside faces outwards (matches the end caps and front-side materials).
+      idx.push(a + k, b + k2, b + k, a + k, a + k2, b + k2)
     }
   }
   if (!p.closed) {

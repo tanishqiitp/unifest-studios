@@ -9,6 +9,8 @@ type Along = (count: number) => { pos: [number, number, number]; rotY: number; r
 /** `along` places copies on the parent curve (array mode 'path'). */
 export function instances(p: Part, along?: Along): Ins[] {
   const a = p.array
+  // Scatter is drawn by the 3D view itself; without a surface to sit on, show just the one part.
+  if (a && a.mode === 'surface') return [{ pos: [0, 0, 0], rotY: 0, sy: 1, flip: false, alt: false }]
   if (a && a.mode === 'path' && along && a.count >= 1) {
     const g = a.grow ?? 0
     return along(a.count).map((c, i) => ({ ...c, sy: Math.max(0.05, 1 + g * i), flip: false, alt: i % 2 === 1 }))

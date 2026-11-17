@@ -150,7 +150,8 @@ export function removeParts(parts: Part[], ids: string[]): Part[] {
 }
 
 // How many copies a part makes (array modifier and mirror).
-export const copies = (p: Part) => Math.max(1, p.array?.count ?? 1) * (p.mirror ? 2 : 1)
+// Capped the same way the 3D view draws them (scatter up to 1,500, other arrays up to 200).
+export const copies = (p: Part) => Math.max(1, Math.min(p.array?.mode === 'surface' ? 1500 : 200, Math.round(p.array?.count ?? 1))) * (p.mirror ? 2 : 1)
 
 // Rough surface area for the quote (box around the part, all copies).
 export function partArea(p: Part) {
@@ -161,7 +162,8 @@ export function partArea(p: Part) {
   const h = p.h * sz
   const a = p.kind === 'plane' || p.kind === 'text' ? w * h : 2 * (w * h + w * d + h * d)
   // Growing copies are taller, so count each copy by its height factor.
-  const grown = p.array && p.array.count > 1 && p.array.grow ? instances(p).reduce((t, i) => t + i.sy, 0) / Math.max(1, instances(p).length) : 1
+  // For scatter, 'grow' is a random size variation around 1, so the average size stays 1.
+  const grown = p.array && p.array.mode !== 'surface' && p.array.count > 1 && p.array.grow ? instances(p).reduce((t, i) => t + i.sy, 0) / Math.max(1, instances(p).length) : 1
   return a * copies(p) * grown
 }
 

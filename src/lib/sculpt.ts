@@ -42,27 +42,40 @@ export function sculptBase(base: SculptBase, res: SculptRes): THREE.BufferGeomet
 
 // ---------------------------------------------------------------- storage
 
-// Positions are stored relative to the part size, as 16-bit numbers in -2..2 (about 0.06 mm per metre),
-// then base64: a medium sphere is ~100 KB instead of ~1 MB of JSON numbers.
+// Positions are stored relative to the part size, as 16-bit numbers, then base64: a medium sphere is
+// ~100 KB instead of ~1 MB of JSON numbers. Each axis may reach twice the part's LARGEST side, so deep relief
+// on a thin panel is kept (v2). Old saves (no prefix) used ±2× each axis's own size.
 const RANGE = 2
 export function encodeSculpt(pos: ArrayLike<number>, size: [number, number, number]): string {
+  const big = Math.max(...size)
+  const range = size.map((s) => (RANGE * big) / Math.max(1e-6, s)) // per axis, in units of that axis's size
   const q = new Int16Array(pos.length)
-  for (let i = 0; i < pos.length; i++) q[i] = Math.max(-32767, Math.min(32767, Math.round((pos[i] / size[i % 3] / RANGE) * 32767)))
+  for (let i = 0; i < pos.length; i++) {
+    const k = i % 3
+    q[i] = Math.max(-32767, Math.min(32767, Math.round((pos[i] / size[k] / range[k]) * 32767)))
+  }
   const bytes = new Uint8Array(q.buffer)
   let s = ''
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-  return btoa(s)
+  return `v2:${range.map((r) => +r.toFixed(6)).join(',')}:${btoa(s)}`
 }
 
 export function decodeSculpt(data: string, size: [number, number, number], count: number): Float32Array | null {
   try {
-    const bin = atob(data)
-    if (bin.length !== count * 3 * 2) return null
+    let range = [RANGE, RANGE, RANGE]
+    let body = data
+    if (data.startsWith('v2:')) {
+      const [, r, b] = data.split(':')
+      range = r.split(',').map(Number)
+      body = b
+    }
+    const bin = atob(body)
+    if (bin.length !== count * 3 * 2 || range.some((r) => !(r > 0))) return null
     const bytes = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
     const q = new Int16Array(bytes.buffer)
     const out = new Float32Array(q.length)
-    for (let i = 0; i < q.length; i++) out[i] = (q[i] / 32767) * RANGE * size[i % 3]
+    for (let i = 0; i < q.length; i++) out[i] = (q[i] / 32767) * range[i % 3] * size[i % 3]
     return out
   } catch {
     return null

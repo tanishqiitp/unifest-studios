@@ -208,20 +208,45 @@ export function SculptSession({ part, objs }: { part?: Part; objs: Record<string
       }
     }
     const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t?.isContentEditable) return
       const s = useSculpt.getState()
       if (e.key === '[') s.set({ radius: Math.max(0.05, +(s.radius * 0.85).toFixed(2)) })
       if (e.key === ']') s.set({ radius: Math.min(10, +(s.radius * 1.15).toFixed(2)) })
     }
+    // Hover (brush outline) only over the 3D view, at most once per frame; strokes follow the mouse everywhere.
+    let hoverQueued: PointerEvent | null = null
+    const hover = (e: PointerEvent) => {
+      if (stroke) return
+      if (!hoverQueued) requestAnimationFrame(() => {
+        const ev = hoverQueued
+        hoverQueued = null
+        if (ev && !stroke) move(ev)
+      })
+      hoverQueued = e
+    }
+    const drag = (e: PointerEvent) => stroke && move(e)
+    const leave = () => {
+      if (stroke || !ring.current?.visible) return
+      ring.current.visible = false
+      invalidate()
+    }
     el.addEventListener('pointerdown', down, true)
     el.addEventListener('click', click, true)
-    window.addEventListener('pointermove', move)
+    el.addEventListener('pointermove', hover)
+    el.addEventListener('pointerleave', leave)
+    window.addEventListener('pointermove', drag)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
     window.addEventListener('keydown', key)
     return () => {
       el.removeEventListener('pointerdown', down, true)
       el.removeEventListener('click', click, true)
-      window.removeEventListener('pointermove', move)
+      el.removeEventListener('pointermove', hover)
+      el.removeEventListener('pointerleave', leave)
+      window.removeEventListener('pointermove', drag)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
       window.removeEventListener('keydown', key)
       if (controls) controls.enabled = true
       if (ring.current) ring.current.visible = false
