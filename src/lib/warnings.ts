@@ -1,6 +1,7 @@
 import type { Project, Workspace } from '../types'
-import { capacity, pixelLayout, portMap, powerPlan, rigging, screenSize, screenStats, stageBounds } from './calc'
+import { pixelLayout, portMap, powerPlan, rigging, screenSize, screenStats, stageBounds } from './calc'
 import { findPanel } from './panels'
+import { audienceEstimate } from './capacity'
 import { seatCount } from './seating'
 import type { Selection } from '../store'
 
@@ -63,9 +64,13 @@ export function getWarnings(p: Project): Warning[] {
 
   // Ground plan
   if (!p.ground.some((g) => g.kind === 'exit')) out.push({ level: 'error', text: 'No emergency exit is marked on the ground plan.', fix: 'Add at least two exits.', workspace: 'ground' })
-  const cap = capacity(p.ground)
-  if (cap > 0 && p.audience > cap * 1.05) out.push({ level: 'warn', text: `Expected ${p.audience} people but the plan holds about ${cap}.`, fix: 'Enlarge the crowd or seating areas.', workspace: 'ground' })
+  const est = audienceEstimate(p)
+  for (const i of est.issues) out.push({ level: i.level, text: i.text, fix: i.invalid ? 'Move or resize it inside the venue, or enlarge the venue.' : undefined, workspace: 'ground', target: i.id ? { kind: 'ground', id: i.id } : undefined })
+  if (est.status === 'check') out.push({ level: 'warn', text: 'Audience space estimate is unverified until the zone problems above are fixed.', workspace: 'ground' })
+  else if (est.status === 'ok' && p.audience > est.estimate) out.push({ level: 'warn', text: `Expected ${p.audience.toLocaleString('en-IN')} people but the space estimate is about ${est.estimate.toLocaleString('en-IN')}.`, fix: 'Enlarge the crowd or seating areas, or lower the expected attendance.', workspace: 'ground' })
+  const zoneIds = new Set(est.zones.map((z) => z.id))
   for (const g of p.ground) {
+    if (zoneIds.has(g.id)) continue // audience zones are reported by the estimate above
     if (g.x < -0.01 || g.y < -0.01 || g.x + g.w > p.venue.w + 0.01 || g.y + g.h > p.venue.l + 0.01)
       out.push({ level: 'warn', text: `${g.label} is outside the venue boundary.`, workspace: 'ground', target: { kind: 'ground', id: g.id } })
   }

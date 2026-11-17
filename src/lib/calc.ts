@@ -1,4 +1,5 @@
-import type { Fixture, GroundItem, Hoist, Panel, Project, Screen, Truss, TrussType } from '../types'
+import { audienceEstimate } from './capacity'
+import type { Fixture, Hoist, Panel, Project, Screen, Truss, TrussType } from '../types'
 import { nanoid } from 'nanoid'
 import { findPanel } from './panels'
 
@@ -391,11 +392,8 @@ function mergeAttached(a: { label: string; kg: number }[]) {
 
 // ---------- Ground plan ----------
 
-export const DENSITY: Partial<Record<GroundItem['kind'], number>> = { crowd: 2, seating: 1 / 0.6, vip: 1 }
-
-export function capacity(ground: GroundItem[]) {
-  return Math.round(ground.reduce((a, g) => a + (DENSITY[g.kind] ?? 0) * g.w * g.h, 0))
-}
+// Audience space: see ./capacity.ts for the shared definition.
+export { DENSITY } from './capacity'
 
 export function stageBounds(project: Project) {
   if (!project.decks.length) return null
@@ -415,6 +413,7 @@ export function totals(project: Project) {
   const ledW = stats.reduce((a, s) => a + s.maxW, 0)
   const fixW = project.fixtures.reduce((a, f) => a + FIXTURE_INFO[f.kind].watts, 0)
   const sb = stageBounds(project)
+  const cap = audienceEstimate(project)
   return {
     pxW: pl.width,
     pxH: pl.height,
@@ -423,7 +422,8 @@ export function totals(project: Project) {
     weight: ledKg + trussKg + fixKg,
     powerKw: (ledW + fixW) / 1000,
     stage: sb ? `${fmt(sb.w)} × ${fmt(sb.l)} m` : '—',
-    capacity: capacity(project.ground),
+    capacity: cap.estimate,
+    capacityStatus: cap.status,
   }
 }
 

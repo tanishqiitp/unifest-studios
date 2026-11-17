@@ -5,7 +5,8 @@ import { useStore } from '../store'
 import type { GroundItem } from '../types'
 import { PlanCanvas } from '../components/PlanCanvas'
 import { GROUND_STYLE, TopView } from '../components/TopView'
-import { capacity, DENSITY, fmt } from '../lib/calc'
+import { fmt } from '../lib/calc'
+import { audienceEstimate, audienceVerdict } from '../lib/capacity'
 import { Check, Num, Section, Stat, Tip, Txt } from '../components/ui'
 
 const DEFAULT_SIZE: Record<GroundItem['kind'], [number, number]> = {
@@ -31,7 +32,9 @@ export function GroundWorkspace() {
   const { mutate, select } = useStore.getState()
   const [sight, setSight] = useState(true)
   const item = sel?.kind === 'ground' ? project.ground.find((g) => g.id === sel.id) : undefined
-  const cap = capacity(project.ground)
+  const est = audienceEstimate(project)
+  const verdict = audienceVerdict(est, project.audience)
+  const zoneEst = item ? est.zones.find((z) => z.id === item.id) : undefined
   const file = useRef<HTMLInputElement>(null)
 
   const add = (kind: GroundItem['kind']) =>
@@ -124,20 +127,32 @@ export function GroundWorkspace() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <Stat label="Area" value={`${fmt(item.w * item.h, 1)} m²`} />
-                {DENSITY[item.kind] && <Stat label="Holds" value={`${Math.round(item.w * item.h * DENSITY[item.kind]!)} ppl`} />}
+                {zoneEst && <Stat label="Space for" value={`~${zoneEst.people.toLocaleString('en-IN')} ppl`} sub={`${fmt(zoneEst.usable, 0)} m² usable`} />}
               </div>
             </Section>
           </div>
         ) : (
           <Section title="Plan summary">
             <div className="grid grid-cols-2 gap-2">
-              <Stat label="Capacity" value={cap.toLocaleString('en-IN')} sub="from crowd + seats" />
-              <Stat label="Expected" value={project.audience.toLocaleString('en-IN')} sub={cap >= project.audience ? 'fits' : 'over capacity'} />
+              <Stat label="Space estimate" value={est.status === 'unknown' ? '—' : `~${est.estimate.toLocaleString('en-IN')}`} sub={est.status === 'check' ? 'unverified' : est.tableSeats ? `incl. ${est.tableSeats} table seats` : 'geometric estimate'} />
+              <Stat label="Expected" value={project.audience.toLocaleString('en-IN')} sub={verdict.text} />
               <Stat label="Venue area" value={`${fmt(project.venue.w * project.venue.l, 0)} m²`} />
               <Stat label="Exits" value={project.ground.filter((g) => g.kind === 'exit').length} />
             </div>
+            {est.issues.length > 0 && (
+              <ul className="space-y-1" aria-label="Audience space issues">
+                {est.issues.map((i, n) => (
+                  <li key={n}>
+                    <button className="w-full text-left text-[11px] leading-snug flex gap-1.5 hover:text-white text-dim disabled:cursor-default" disabled={!i.id} onClick={() => i.id && select({ kind: 'ground', id: i.id })}>
+                      <span className={i.level === 'error' ? 'text-err font-semibold' : 'text-warn font-semibold'}>{i.level === 'error' ? 'Error' : 'Check'}</span>
+                      <span>{i.text}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <p className="text-[11px] text-mute leading-relaxed flex gap-1.5">
-              <Tip text="Densities used: standing 2/m², seating 1 per 0.6 m², VIP 1/m². Check local fire-safety rules for your venue." />
+              <Tip text={est.assumptions.join(' ')} />
               Capacity is an estimate. Always confirm with your venue and local authorities.
             </p>
           </Section>

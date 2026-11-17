@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf'
 import { autoTable } from 'jspdf-autotable'
 import type { Project } from '../../types'
-import { capacity, fmt, pixelLayout, portMap, powerPlan, rigging, screenColumns, screenStats, totals, TRUSS_INFO, VOLTS } from '../calc'
+import { fmt, pixelLayout, portMap, powerPlan, rigging, screenColumns, screenStats, totals, TRUSS_INFO, VOLTS } from '../calc'
 import { getWarnings } from '../warnings'
 import { equipmentList } from './equipment'
 import { pixelMapCanvas, slug } from './files'
@@ -126,7 +126,7 @@ export function exportTechnicalPDF(p: Project) {
     ['Stage', t.stage],
     ['Total weight', `${Math.round(t.weight)} kg`],
     ['Power (max)', `${fmt(t.powerKw, 1)} kW`],
-    ['Capacity', `${t.capacity}`],
+    ['Space estimate', t.capacityStatus === 'ok' ? `~${t.capacity.toLocaleString('en-IN')} ppl` : t.capacityStatus === 'check' ? 'Unverified' : 'Not estimated'],
   ]
   kpis.forEach(([k, v], i) => {
     const x = MARGIN + 6 + i * 56
@@ -216,7 +216,7 @@ export function exportTechnicalPDF(p: Project) {
     margin: { left: MARGIN + (W - MARGIN * 3) * 0.7 + MARGIN, right: MARGIN },
     head: [['Zone', 'Type', 'Size']],
     body: p.ground.map((g) => [g.label, GROUND_LABELS[g.kind], `${fmt(g.w, 1)} × ${fmt(g.h, 1)} m`]),
-    foot: [[`Capacity ~ ${capacity(p.ground)}`, `Expected ${p.audience}`, `${p.venue.w} × ${p.venue.l} m`]],
+    foot: [[t.capacityStatus === 'ok' ? `Space estimate ~${t.capacity.toLocaleString('en-IN')} (not a licensed capacity)` : 'Space estimate unverified: fix audience zones', `Expected ${p.audience.toLocaleString('en-IN')}`, `${fmt(p.venue.w, 1)} × ${fmt(p.venue.l, 1)} m`]],
     footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] },
   })
 

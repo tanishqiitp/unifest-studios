@@ -417,7 +417,7 @@ function Hud() {
     ['Stage', t.stage, true],
     ['Weight', `${Math.round(t.weight).toLocaleString('en-IN')} kg`],
     ['Power', `${fmt(t.powerKw, 1)} kW`],
-    ['Capacity', `${t.capacity.toLocaleString('en-IN')}`, true],
+    ['Space est.', t.capacityStatus === 'ok' ? `~${t.capacity.toLocaleString('en-IN')}` : t.capacityStatus === 'check' ? 'unverified' : '—', true],
     ...(project.tables.length ? ([['Seats', seatCount(project).toLocaleString('en-IN')]] as [string, string][]) : []),
   ]
   const ws = useStore((s) => s.ui.workspace)

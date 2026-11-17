@@ -1,5 +1,5 @@
 import type { Project } from '../types'
-import { capacity } from './calc'
+import { audienceEstimate } from './capacity'
 
 // Crowd and exit maths plus an Indian permit/safety checklist. All figures are indicative, not a substitute for a licensed safety officer.
 
@@ -24,10 +24,11 @@ export interface CrowdCheck {
 export const isOutdoor = (eventType: string) => /open-air|fest/i.test(eventType)
 
 export function crowdCheck(p: Project): CrowdCheck {
-  const zones = p.ground.filter((g) => ['crowd', 'vip', 'seating'].includes(g.kind))
-  const area = zones.reduce((a, g) => a + g.w * g.h, 0)
-  const standing = p.ground.filter((g) => g.kind === 'crowd' || g.kind === 'vip').reduce((a, g) => a + g.w * g.h, 0)
-  const cap = capacity(p.ground)
+  // Usable areas from the shared estimate: inside the venue, not under the stage, overlaps counted once.
+  const est = audienceEstimate(p)
+  const area = est.usableArea
+  const standing = est.zones.filter((z) => z.kind === 'crowd' || z.kind === 'vip').reduce((a, z) => a + z.usable, 0)
+  const cap = est.estimate
   const audience = p.audience
   const densityPerM2 = standing > 0 ? audience / standing : 0
   const level: CrowdCheck['level'] = densityPerM2 > 4 ? 'error' : densityPerM2 > 2 ? 'warn' : 'ok'
@@ -38,7 +39,8 @@ export function crowdCheck(p: Project): CrowdCheck {
   const requiredExitWidth = audience / (FLOW * targetMinutes)
   const exitsNeeded = 2 + Math.ceil(Math.max(0, audience - 500) / 1000)
   const messages: string[] = []
-  if (audience > cap && cap > 0) messages.push(`Audience of ${audience} is above the ${cap} the zones hold; add floor area or reduce the audience.`)
+  if (est.status === 'check') messages.push('The audience zones need fixing (see the Ground plan), so the space figures here are unverified.')
+  else if (audience > cap && cap > 0) messages.push(`Audience of ${audience} is above the ${cap} the zones hold; add floor area or reduce the audience.`)
   if (level === 'error') messages.push(`Standing density is ${densityPerM2.toFixed(1)} persons per m², which is unsafe (above 4). Enlarge the crowd area or cut numbers.`)
   else if (level === 'warn') messages.push(`Standing density is ${densityPerM2.toFixed(1)} persons per m²; above 2 gets tight for movement and emergencies.`)
   if (exits.length === 0) messages.push('No exits are marked on the ground plan.')

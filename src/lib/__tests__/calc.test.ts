@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, Screen } from '../../types'
-import { allowableLoad, autoRig, cableOrder, capacity, circuitsFor, pixelLayout, portMap, powerPlan, rigging, screenColumns, screenStats, stockPieces, totals } from '../calc'
+import { allowableLoad, autoRig, cableOrder, circuitsFor, pixelLayout, portMap, powerPlan, rigging, screenColumns, screenStats, stockPieces, totals } from '../calc'
 import { findPanel } from '../panels'
 import { emptyProject } from '../templates'
 
@@ -152,15 +152,6 @@ describe('Rigging', () => {
 })
 
 describe('Ground plan', () => {
-  it('estimates capacity from zone densities', () => {
-    const g = [
-      { id: 'a', kind: 'crowd' as const, x: 0, y: 0, w: 10, h: 10, rotation: 0, label: '' },
-      { id: 'b', kind: 'vip' as const, x: 0, y: 0, w: 5, h: 4, rotation: 0, label: '' },
-      { id: 'c', kind: 'food' as const, x: 0, y: 0, w: 50, h: 50, rotation: 0, label: '' },
-    ]
-    expect(capacity(g)).toBe(200 + 20)
-  })
-
   it('totals pixels, weight and power across the project', () => {
     const p = project({ screens: [screen(), screen({ id: 's2', x: 6 })] })
     const t = totals(p)
