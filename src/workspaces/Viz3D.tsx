@@ -64,10 +64,12 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [camReq, setCamReq] = useState(0)
   const [look, setLook] = useState<Look>('show')
   const [palette, setPalette] = useState<Palette>('duo')
-  const [motion, setMotion] = useState(true)
+  // Reduced-motion users start with still lights and no auto-orbit; both can be switched on.
+  const calm = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  const [motion, setMotion] = useState(!calm)
   const [crowd, setCrowd] = useState(true)
   const [labels, setLabels] = useState(false)
-  const [showcase, setShowcase] = useState(!!compact)
+  const [showcase, setShowcase] = useState(!!compact && !calm)
   // Phones get lighter rendering so the 3D view stays smooth and the battery lasts.
   const lowPower = useDevice((d) => d.kind === 'phone') || !!compact
   const [qPref, setQPref] = useState<QualityPref>(() => {

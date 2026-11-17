@@ -438,7 +438,7 @@ function ViewContext({ view }: { view: CadView }) {
   const p = useStore((s) => s.project)
   const v = useView()
   const L = setLine(p)
-  const mono = { fontFamily: 'JetBrains Mono', fill: '#6b6b6b' }
+  const mono = { fontFamily: 'JetBrains Mono', fill: '#8a8a8a' }
   const thin = { strokeWidth: 1, strokeScaleEnabled: false }
   if (view === 'top')
     return (

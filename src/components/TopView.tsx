@@ -4,7 +4,7 @@ import type Konva from 'konva'
 import { useStore } from '../store'
 import type { GroundItem, Project, Table } from '../types'
 import { CHAIR, isSeated, seatPositions } from '../lib/seating'
-import { rigging, screenColumns, screenStats, TRUSS_INFO } from '../lib/calc'
+import { fmt, rigging, screenColumns, screenStats, TRUSS_INFO } from '../lib/calc'
 import { useSnap, useView } from './PlanCanvas'
 import { clearGuides, SnapGuides, topSnap } from './Align'
 import { DecorNode } from './DecorNode'
@@ -35,7 +35,7 @@ export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sight
     <>
       <VenueImage project={p} />
       <Rect x={0} y={0} width={p.venue.w} height={p.venue.l} stroke="#ffffff" strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
-      <Text x={0} y={-18 / v.scale} text={`VENUE ${p.venue.w} × ${p.venue.l} m`} fontSize={11 / v.scale} fill="#6b6b6b" fontFamily="JetBrains Mono" listening={false} />
+      <Text x={0} y={-18 / v.scale} text={`VENUE ${fmt(p.venue.w, 1)} × ${fmt(p.venue.l, 1)} m`} fontSize={11 / v.scale} fill="#8a8a8a" fontFamily="JetBrains Mono" listening={false} />
       <Line points={[p.venue.w / 2, 0, p.venue.w / 2, p.venue.l]} stroke="#fff" opacity={0.12} dash={[6, 6]} strokeWidth={1} strokeScaleEnabled={false} listening={false} />
       {p.ground.map((g) => (
         <GroundNode key={g.id} g={g} editable={edit === 'ground'} />
@@ -219,7 +219,7 @@ function DeckNode({ id, editable, dim }: { id: string; editable: boolean; dim: b
           })
         }}
       />
-      {editable && v.scale > 18 && <Text x={d.x} y={d.y + d.l / 2 - 5 / v.scale} width={d.w} align="center" text={`${d.h}`} fontSize={10 / v.scale} fill="#6b6b6b" fontFamily="JetBrains Mono" listening={false} />}
+      {editable && v.scale > 18 && <Text x={d.x} y={d.y + d.l / 2 - 5 / v.scale} width={d.w} align="center" text={`${d.h}`} fontSize={10 / v.scale} fill="#8a8a8a" fontFamily="JetBrains Mono" listening={false} />}
     </Group>
   )
 }
@@ -278,7 +278,7 @@ function Sightlines({ project }: { project: Project }) {
             <Arc innerRadius={minD} outerRadius={minD} angle={180} rotation={facing - 90} stroke="#fff" opacity={0.5} strokeWidth={1} dash={[3, 3]} strokeScaleEnabled={false} />
             <Arc innerRadius={optD} outerRadius={optD} angle={180} rotation={facing - 90} stroke="#fff" opacity={0.3} strokeWidth={1} strokeScaleEnabled={false} />
             <Text x={0.2} y={minD + 0.1} text={`min ${minD} m`} fontSize={0.45} fill="#a3a3a3" fontFamily="JetBrains Mono" />
-            <Text x={0.2} y={optD + 0.1} text={`best from ${optD.toFixed(0)} m`} fontSize={0.45} fill="#6b6b6b" fontFamily="JetBrains Mono" />
+            <Text x={0.2} y={optD + 0.1} text={`best from ${optD.toFixed(0)} m`} fontSize={0.45} fill="#8a8a8a" fontFamily="JetBrains Mono" />
           </Group>
         )
       })}

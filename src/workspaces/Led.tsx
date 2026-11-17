@@ -151,11 +151,11 @@ function Elevation({ project }: { project: Project }) {
   return (
     <Group listening={false}>
       <Line points={[-50, 0, project.venue.w + 50, 0]} stroke="#3f3f3f" strokeWidth={1} strokeScaleEnabled={false} />
-      <Text x={0.2} y={0.15} text="GROUND 0.0 m" fontSize={fs} fill="#6b6b6b" fontFamily="JetBrains Mono" />
+      <Text x={0.2} y={0.15} text="GROUND 0.0 m" fontSize={fs} fill="#8a8a8a" fontFamily="JetBrains Mono" />
       {sb && (
         <>
           <Rect x={sb.x} y={-sb.h} width={sb.w} height={sb.h} fill="#0f0f0f" stroke="#2a2a2a" strokeWidth={1} strokeScaleEnabled={false} />
-          <Text x={sb.x + 0.2} y={-sb.h + 0.15} text={`STAGE +${fmt(sb.h, 2)} m`} fontSize={fs} fill="#6b6b6b" fontFamily="JetBrains Mono" />
+          <Text x={sb.x + 0.2} y={-sb.h + 0.15} text={`STAGE +${fmt(sb.h, 2)} m`} fontSize={fs} fill="#8a8a8a" fontFamily="JetBrains Mono" />
         </>
       )}
       {trussLines.map((t) => {

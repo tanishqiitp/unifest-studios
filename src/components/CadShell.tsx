@@ -133,7 +133,7 @@ function Ground({ view, b }: { view: FlatView; b: { x: number; y: number; w: num
   return (
     <Group listening={false}>
       <Line points={[b.x - 200, 0, b.x + b.w + 200, 0]} stroke="#ffffff" opacity={0.5} strokeWidth={1.5} strokeScaleEnabled={false} />
-      <Text x={b.x + 0.5} y={6 / v.scale} text={view === 'side' ? 'GROUND · AUDIENCE →' : 'GROUND'} fontSize={10 / v.scale} fill="#6b6b6b" fontFamily="JetBrains Mono" />
+      <Text x={b.x + 0.5} y={6 / v.scale} text={view === 'side' ? 'GROUND · AUDIENCE →' : 'GROUND'} fontSize={10 / v.scale} fill="#8a8a8a" fontFamily="JetBrains Mono" />
     </Group>
   )
 }
