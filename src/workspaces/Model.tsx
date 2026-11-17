@@ -1,3 +1,4 @@
+import { StudioEnv } from './StudioEnv'
 import { useGlCreated } from '../components/Safe3D'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
@@ -524,6 +525,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
       {q === 'auto' && <PerformanceMonitor onDecline={() => setDpr((d) => Math.max(0.75, d - 0.25))} onIncline={() => setDpr((d) => Math.min(max, d + 0.25))} flipflops={4} />}
       <color attach="background" args={[light ? '#eeeeee' : '#0b0b0b']} />
       <hemisphereLight args={['#ffffff', light ? '#a0a0a0' : '#1c1c1c', light ? 1.6 : 1.2]} />
+      <StudioEnv />
       <directionalLight position={[L.cx + 25, 40, L.front + 30]} intensity={1.8} castShadow={shadows} shadow-mapSize={[2048, 2048]} shadow-camera-left={-40} shadow-camera-right={40} shadow-camera-top={40} shadow-camera-bottom={-40} />
       <directionalLight position={[L.cx - 30, 20, L.front - 20]} intensity={0.5} />
       {shadows && (
@@ -554,8 +556,8 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
 
 // Development only: lets automated checks reach the camera.
 function DevHook() {
-  const { camera, gl } = useThree()
-  useEffect(() => void ((window as unknown as Record<string, unknown>).__model = { camera, gl, ui: useModel }), [camera, gl])
+  const { camera, gl, scene } = useThree()
+  useEffect(() => void ((window as unknown as Record<string, unknown>).__model = { camera, gl, scene, ui: useModel }), [camera, gl, scene])
   return null
 }
 
@@ -770,6 +772,13 @@ function Props({ p }: { p: Part }) {
             <div className="grid grid-cols-2 gap-2">
               <Num label="Taper (top size)" value={p.taper ?? 1} onChange={(taper) => up({ taper: Math.max(0, Math.min(3, taper)) })} step={0.05} tip="1 = straight sides, 0.5 = half as wide at the top (angled towers), 0 = a point." />
               <Num label="Twist" value={p.twist ?? 0} onChange={(twist) => up({ twist: Math.max(-720, Math.min(720, twist)) })} unit="°" step={15} tip="Turn the top relative to the bottom: twisted columns and flowing forms." />
+            </div>
+          )}
+          {p.kind !== 'plane' && p.kind !== 'text' && (
+            <div className="grid grid-cols-3 gap-2">
+              <Num label="Bend" value={p.bend ?? 0} onChange={(bend) => up({ bend: Math.max(-359, Math.min(359, bend)) })} unit="°" step={15} tip="Curl the width into an arc: 180° turns a flat ribbon into a standing arch; negative curls upwards." />
+              <Num label="Sculpt" value={Math.round((p.organic ?? 0) * 100)} onChange={(o) => up({ organic: Math.max(0, Math.min(100, o)) / 100 })} unit="%" step={5} tip="Smooth sculpted bumps over the surface, for organic forms. Works best on spheres and big boxes." />
+              <Num label="Pattern" value={p.seed ?? 1} onChange={(seed) => up({ seed: Math.round(seed) })} step={1} int tip="Try other numbers for a different sculpted pattern." />
             </div>
           )}
         </Section>

@@ -1,3 +1,4 @@
+import { StudioEnv } from './StudioEnv'
 import { Safe3D, useGlCreated } from '../components/Safe3D'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PartsScene } from './Parts3D'
@@ -53,6 +54,7 @@ function SetCad3DView({ compact, edit = 'set' }: { compact?: boolean; edit?: str
       >
         <color attach="background" args={[light ? '#f2f2f2' : '#070707']} />
         <hemisphereLight args={['#ffffff', light ? '#9a9a9a' : '#202020', light ? 1.8 : 1.4]} />
+        <StudioEnv />
         <directionalLight position={[L.cx + 20, 40, L.y + 30]} intensity={1.6} />
         <Grid position={[L.cx, 0.001, L.y + 10]} args={[200, 200]} cellSize={1} sectionSize={5} cellColor={light ? '#d6d6d6' : '#1d1d1d'} sectionColor={light ? '#b0b0b0' : '#333333'} fadeDistance={160} infiniteGrid />
         <Things project={project} pick={pick} hide={drag} />

@@ -161,8 +161,9 @@ export function partArea(p: Part) {
 
 // ---------- ready-made assemblies ----------
 
-export type AssemblyId = 'festival' | 'staircase' | 'colonnade' | 'podium' | 'chandelier' | 'portal' | 'dome-pavilion'
+export type AssemblyId = 'crown' | 'festival' | 'staircase' | 'colonnade' | 'podium' | 'chandelier' | 'portal' | 'dome-pavilion'
 export const ASSEMBLIES: { id: AssemblyId; name: string; blurb: string }[] = [
+  { id: 'crown', name: 'Celestial Crown (sculpted)', blurb: 'Sculpted LED orb, gyroscope halos, twisted spire crown, feathered wings, ribbon arches' },
   { id: 'festival', name: 'Festival stage', blurb: 'Platform, centre LED in three nested arches, mirrored wings with rising fins, angled towers' },
   { id: 'staircase', name: 'Grand staircase', blurb: 'Wide steps with side walls, up to the stage' },
   { id: 'colonnade', name: 'Colonnade', blurb: 'Row of turned columns made with Array' },
@@ -190,7 +191,64 @@ export function buildAssembly(p: Project, id: AssemblyId): Part[] {
   const kid = (kind: PartKind, pos: Vec3, extra: Partial<Part> = {}) => newPart(kind, pos, { parent: g.id, ...extra })
   const gold = MAT_PRESETS.Gold
   let kids: Part[] = []
-  if (id === 'festival') {
+  if (id === 'crown') {
+    // A sculptural centrepiece built only from editable tools: sculpt, taper, twist, bend, spin,
+    // extrude and growing radial arrays. Every piece can be selected, resized, recoloured or hidden.
+    const hasStage = p.decks.length > 0
+    const top = hasStage ? L.deckH : 1.2
+    const back = hasStage ? L.y - 0.4 : L.front - 10
+    g.pos = [L.cx, back + 3, 0]
+    const sub = (name: string, pos: Vec3) => newPart('group', pos, { parent: g.id, name })
+    const neon = MAT_PRESETS['Neon glow']
+    const gold = MAT_PRESETS.Gold
+    const chrome = MAT_PRESETS.Chrome
+    const orbD = 6.5
+    const orbBase = top + 0.9
+    const orbMid = orbBase + orbD / 2
+    if (!hasStage) kids.push(kid('box', [0, 2, 0], { name: 'Platform', w: 32, d: 12, h: top, bevel: 0.05, mat: MAT_PRESETS['Matte black'] }))
+
+    // Heart: a sculpted LED orb on a turned pedestal, wrapped in gyroscope halos.
+    const heart = sub('Heart', [0, 0, 0])
+    const inH = (kind: PartKind, pos: Vec3, extra: Partial<Part>) => newPart(kind, pos, { parent: heart.id, ...extra })
+    kids.push(
+      heart,
+      inH('lathe', [0, 0, top], { name: 'Pedestal', w: 4, d: 4, h: 1.2, seg: 64, profile: [[0, 0], [1, 0], [1, 0.08], [0.62, 0.22], [0.46, 0.5], [0.56, 0.78], [0.9, 0.9], [0.9, 1], [0, 1]], mat: gold }),
+      inH('sphere', [0, 0, orbBase], { name: 'Sculpted LED orb', w: orbD, d: orbD, h: orbD, seg: 96, organic: 0.16, seed: 3, mat: MAT_PRESETS['LED content'] }),
+      ...[0, 60, 120].map((turn, i) => {
+        const dia = 8.4 + i * 1
+        return inH('torus', [0, 0, orbMid - dia / 2], { name: `Halo ${i + 1}`, w: dia, d: dia, h: dia, thick: 0.07, seg: 64, rot: [0, 0, turn], mat: i === 1 ? gold : neon })
+      }),
+    )
+
+    // Crown: twisted, tapered spires on a half ring behind the orb, rising to the centre, alternating gold/neon.
+    const crown = sub('Spire crown', [0, 0, top])
+    const spire = (name: string, rotZ: number, sweep: number, count: number, h: number, grow: number) =>
+      newPart('box', [0, 0, 0], { parent: crown.id, name, w: 0.45, d: 0.45, h, taper: 0.06, twist: 160, rot: [0, 0, rotZ], mat: chrome, array: { mode: 'radial', count, offset: [0, 0, 0], radius: 7.2, angle: sweep, grow, alt: neon.color } })
+    kids.push(crown, spire('Spires right', 90, 90, 7, 7.5, 0.12), spire('Spires left', 195, 75, 6, 7.5 * 1.6, -0.075))
+
+    // Wings: extruded feather silhouettes, mirrored, each with a neon inner layer for depth.
+    const feather: [number, number][] = [[0, 0.05], [0.15, 0.33], [0.35, 0.6], [0.6, 0.83], [0.85, 0.97], [1, 1], [0.92, 0.86], [0.97, 0.77], [0.82, 0.66], [0.88, 0.56], [0.7, 0.45], [0.76, 0.35], [0.55, 0.26], [0.6, 0.16], [0.35, 0.1], [0.18, 0]]
+    for (const side of [-1, 1] as const) {
+      const wing = sub(side < 0 ? 'Left wing' : 'Right wing', [side * (orbD / 2 + 5), 1.6, top + 0.4])
+      const inW = (kind: PartKind, pos: Vec3, extra: Partial<Part>) => newPart(kind, pos, { parent: wing.id, ...extra })
+      kids.push(
+        wing,
+        inW('extrude', [0, 0, 0], { name: 'Feathers', w: 9, d: 0.25, h: 9, profile: feather, bevel: 0.04, scl: [side, 1, 1], mat: gold }),
+        inW('extrude', [side * -0.9, 0.3, 1.2], { name: 'Inner glow', w: 5.6, d: 0.12, h: 5.6, profile: feather, scl: [side, 1, 1], mat: neon }),
+      )
+    }
+
+    // Backdrop: three ribbons bent into nested arches, and a neon line curving along the apron.
+    const ribbons = sub('Ribbon arches', [0, 0, top])
+    kids.push(
+      ribbons,
+      ...[0, 1, 2].map((i) => newPart('box', [0, -6.4 - i * 0.7, 0], { parent: ribbons.id, name: `Ribbon ${i + 1}`, w: 26 + i * 4, h: 0.35, d: 1.1 - i * 0.2, bend: 180, mat: i === 1 ? neon : chrome })),
+      kid('box', [0, 5.2, top], { name: 'Apron light', w: 18, h: 0.12, d: 0.4, bend: -24, mat: neon }),
+    )
+
+    // Sculpted twisted columns framing the set.
+    for (const sd of [-1, 1]) kids.push(kid('box', [sd * 14, 0, top], { name: sd < 0 ? 'Left column' : 'Right column', w: 1.3, d: 1.3, h: 10, taper: 0.55, twist: sd * 270, organic: 0.22, seed: sd < 0 ? 5 : 8, mat: chrome }))
+  } else if (id === 'festival') {
     // A tree you can select whole, by part (centre, a wing) or by single panel. It sizes itself to the
     // existing stage (or brings its own platform), and every size stays editable.
     const hasStage = p.decks.length > 0

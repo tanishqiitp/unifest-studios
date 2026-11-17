@@ -18,31 +18,82 @@ export type Shading = 'solid' | 'material' | 'wire' | 'xray'
 
 // ---------- geometry (origin at the bottom centre; x across, y up, z depth) ----------
 
-// Taper and twist bend the shape along its height; editable at any time because they are applied on build.
+// Sculpting, applied on build so every value stays editable: an organic surface (smooth bumps pushed along the
+// surface normal), taper and twist along the height, and bend, which curls the width into an arc.
+const tween = (a: number, b: number, t: number) => a + (b - a) * t
+// Smooth repeatable 3D noise from layered sines: no dependency, same result for the same seed.
+function ripple(x: number, y: number, z: number, s: number) {
+  return (
+    Math.sin(1.7 * x + s) * Math.sin(1.3 * y + 2.1 * s) * Math.sin(1.9 * z + 0.7 * s) +
+    0.5 * Math.sin(3.1 * x - 1.3 * s) * Math.sin(2.7 * y + 0.4 * s) * Math.sin(3.3 * z + 1.9 * s) +
+    0.25 * Math.sin(6.3 * x + 0.9 * s) * Math.sin(5.9 * y - 1.7 * s) * Math.sin(6.7 * z + 2.3 * s)
+  )
+}
+
 export function partGeometry(p: Part): THREE.BufferGeometry | null {
-  const deform = (p.taper !== undefined && Math.abs(p.taper - 1) > 1e-3) || !!p.twist
-  const g = baseGeometry(p, deform)
-  if (!g || !deform) return g
-  const pos = g.getAttribute('position')
-  const box = new THREE.Box3().setFromBufferAttribute(pos as THREE.BufferAttribute)
+  const tapered = p.taper !== undefined && Math.abs(p.taper - 1) > 1e-3
+  const organic = (p.organic ?? 0) > 0
+  const bend = Math.abs(p.bend ?? 0) > 0.5
+  const g = baseGeometry(p, { taper: tapered || !!p.twist, organic, bend })
+  if (!g || !(tapered || p.twist || organic || bend)) return g
+  const pos = g.getAttribute('position') as THREE.BufferAttribute
+  const box = new THREE.Box3().setFromBufferAttribute(pos)
   const y0 = box.min.y
   const span = Math.max(1e-6, box.max.y - y0)
-  const taper = p.taper ?? 1
-  const tw = THREE.MathUtils.degToRad(p.twist ?? 0)
-  for (let i = 0; i < pos.count; i++) {
-    const t = (pos.getY(i) - y0) / span
-    const k = 1 + (taper - 1) * t
-    const a = tw * t
-    const x = pos.getX(i) * k
-    const z = pos.getZ(i) * k
-    pos.setXYZ(i, x * Math.cos(a) - z * Math.sin(a), pos.getY(i), x * Math.sin(a) + z * Math.cos(a))
+  if (organic) {
+    if (!g.getAttribute('normal')) g.computeVertexNormals()
+    const nrm = g.getAttribute('normal') as THREE.BufferAttribute
+    const size = Math.max(0.05, Math.min(p.w, p.h, p.d))
+    const amp = (p.organic ?? 0) * size * 0.5
+    const f = 2.4 / Math.max(0.2, Math.max(p.w, p.h, p.d) * 0.35)
+    const seed = p.seed ?? 1
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const z = pos.getZ(i)
+      const n = ripple(x * f, y * f, z * f, seed) * amp
+      pos.setXYZ(i, x + nrm.getX(i) * n, y + nrm.getY(i) * n, z + nrm.getZ(i) * n)
+    }
+  }
+  if (tapered || p.twist) {
+    const taper = p.taper ?? 1
+    const tw = THREE.MathUtils.degToRad(p.twist ?? 0)
+    for (let i = 0; i < pos.count; i++) {
+      const t = (pos.getY(i) - y0) / span
+      const k = tween(1, taper, t)
+      const a = tw * t
+      const x = pos.getX(i) * k
+      const z = pos.getZ(i) * k
+      pos.setXYZ(i, x * Math.cos(a) - z * Math.sin(a), pos.getY(i), x * Math.sin(a) + z * Math.cos(a))
+    }
+  }
+  if (bend) {
+    // Curl the width around a centre below the part: 180° turns a flat ribbon into a standing arch.
+    const total = THREE.MathUtils.degToRad(Math.max(-359, Math.min(359, p.bend ?? 0)))
+    const w = Math.max(1e-6, box.max.x - box.min.x)
+    const R = w / Math.abs(total)
+    const sign = Math.sign(total)
+    for (let i = 0; i < pos.count; i++) {
+      const th = ((pos.getX(i) - (box.min.x + box.max.x) / 2) / w) * total
+      const r = R + sign * (pos.getY(i) - y0)
+      pos.setXYZ(i, Math.sin(th) * r * sign, y0 + sign * (Math.cos(th) * r - R), pos.getZ(i))
+    }
+    // Stand the curled shape back on the ground.
+    const nb = new THREE.Box3().setFromBufferAttribute(pos)
+    g.translate(0, -nb.min.y, 0)
   }
   pos.needsUpdate = true
   g.computeVertexNormals()
+  g.computeBoundingBox()
+  g.computeBoundingSphere()
   return g
 }
 
-function baseGeometry(p: Part, deform = false): THREE.BufferGeometry | null {
+function baseGeometry(p: Part, need: { taper: boolean; organic: boolean; bend: boolean } = { taper: false, organic: false, bend: false }): THREE.BufferGeometry | null {
+  // Shapes that will be sculpted need enough points to bend smoothly.
+  const sx = need.bend ? 96 : need.organic ? 24 : need.taper ? 2 : 1
+  const sy = need.organic ? 24 : need.taper ? 16 : need.bend ? 2 : 1
+  const sz = need.organic ? 12 : need.taper ? 2 : 1
   const { w, h, d } = p
   const seg = Math.max(3, Math.round(p.seg ?? 32))
   let g: THREE.BufferGeometry
@@ -50,7 +101,7 @@ function baseGeometry(p: Part, deform = false): THREE.BufferGeometry | null {
     case 'group':
       return null
     case 'box':
-      g = p.bevel && p.bevel > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(p.bevel, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d, deform ? 2 : 1, deform ? 16 : 1, deform ? 2 : 1)
+      g = p.bevel && p.bevel > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(p.bevel, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d, sx, sy, sz)
       g.translate(0, h / 2, 0)
       return g
     case 'cylinder':

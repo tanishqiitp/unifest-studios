@@ -86,3 +86,19 @@ describe('festival stage builder', () => {
     expect(ins.some((i) => i.alt)).toBe(true)
   })
 })
+
+describe('Celestial Crown (sculpted)', () => {
+  it('is an editable tree built from sculpt, bend, twist and growing arrays', async () => {
+    const { buildAssembly, childrenOf, slimArch } = await import('../parts')
+    const { generateProject, TEMPLATES } = await import('../templates')
+    const parts = buildAssembly(generateProject(TEMPLATES[0]), 'crown')
+    const root = parts.find((x) => !x.parent)!
+    expect(childrenOf(parts, root.id).map((x) => x.name)).toEqual(expect.arrayContaining(['Heart', 'Spire crown', 'Left wing', 'Right wing', 'Ribbon arches']))
+    expect(parts.find((x) => x.name === 'Sculpted LED orb')!.organic).toBeGreaterThan(0)
+    expect(parts.filter((x) => x.bend).length).toBeGreaterThanOrEqual(3)
+    expect(parts.filter((x) => x.array?.mode === 'radial' && x.array.grow).length).toBe(2)
+    expect(parts.every((x) => x.id && (x.parent === undefined || parts.some((q) => q.id === x.parent)))).toBe(true)
+    // The slim arch outline is closed and stays inside 0..1.
+    expect(slimArch(0.05).every(([u, v]) => u >= -1e-9 && u <= 1 + 1e-9 && v >= 0 && v <= 1)).toBe(true)
+  })
+})

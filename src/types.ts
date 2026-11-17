@@ -381,6 +381,9 @@ export interface Part {
   text?: string
   taper?: number // top size as a fraction of the bottom (1 = straight, 0.3 = pointed)
   twist?: number // degrees turned from bottom to top
+  bend?: number // degrees the width curls into an arc (180 = a standing arch)
+  organic?: number // 0..1: smooth sculpted bumps over the surface
+  seed?: number // changes the organic pattern
   mat: PartMat
   array?: PartArray
   mirror?: boolean // live copy across the venue centre line (top-level parts)
