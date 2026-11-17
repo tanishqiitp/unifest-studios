@@ -50,6 +50,7 @@ export function SetCad3D({ compact, edit = 'set' }: { compact?: boolean; edit?: 
         {piece && <SetHandle s={piece} mode={mode} />}
         {item && <BoxHandle item={item} onDrag={setDrag} />}
         <CamRig cam={cam} cx={L.cx} cy={L.y} />
+        {import.meta.env.DEV && <DevScene />}
         <GizmoHelper alignment="bottom-right" margin={compact ? [56, 56] : [80, 110]}>
           <GizmoViewport axisColors={['#e5484d', '#46a758', '#3e63dd']} labels={['X', 'Z', 'Y']} labelColor="#000" />
         </GizmoHelper>
@@ -75,6 +76,13 @@ export function SetCad3D({ compact, edit = 'set' }: { compact?: boolean; edit?: 
       {!compact && <div className="absolute left-4 bottom-4 text-[11px] text-mute">Drag to orbit · right-drag to pan · scroll to zoom · click an item, then drag the arrows (red X across, blue Y depth, green Z height)</div>}
     </div>
   )
+}
+
+// Development only: exposes the scene for checks in the browser console.
+function DevScene() {
+  const scene = useThree((s) => s.scene)
+  useEffect(() => void ((window as unknown as { __cad: unknown }).__cad = scene), [scene])
+  return null
 }
 
 function CamRig({ cam, cx, cy }: { cam: { v: Cam; n: number }; cx: number; cy: number }) {
@@ -115,11 +123,11 @@ function SetHandle({ s, mode }: { s: SetPiece; mode: 'translate' | 'rotate' }) {
   }
   return (
     <>
-      <group key={`${s.id}-${nonce}`} ref={ref} position={[s.x, s.z + s.h / 2, s.y]} rotation-y={-THREE.MathUtils.degToRad(s.rot ?? 0)}>
+      <group key={`box-${s.id}-${nonce}`} ref={ref} position={[s.x, s.z + s.h / 2, s.y]} rotation-y={-THREE.MathUtils.degToRad(s.rot ?? 0)}>
         <SelBox w={s.w} h={s.h} d={s.d} />
       </group>
       <TransformControls
-        key={`${s.id}-${nonce}-${mode}`}
+        key={`ctl-${s.id}-${nonce}-${mode}`}
         object={ref as React.RefObject<THREE.Object3D>}
         mode={mode}
         size={0.9}
@@ -161,11 +169,11 @@ function BoxHandle({ item, onDrag }: { item: CadItem; onDrag: (id: string | null
   useEffect(() => () => onDrag(null), [onDrag])
   return (
     <>
-      <group key={`${item.id}-${nonce}`} ref={ref} position={c}>
+      <group key={`box-${item.id}-${nonce}`} ref={ref} position={c}>
         <SelBox w={b.x1 - b.x0} h={b.z1 - b.z0} d={b.y1 - b.y0} fill={moving ? item.color : undefined} />
       </group>
       <TransformControls
-        key={`${item.id}-${nonce}`}
+        key={`ctl-${item.id}-${nonce}`}
         object={ref as React.RefObject<THREE.Object3D>}
         mode="translate"
         size={0.9}
