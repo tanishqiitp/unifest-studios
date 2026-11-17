@@ -57,7 +57,15 @@ export function Guide() {
   const { setUI } = useStore.getState()
   const [hidden, setHidden] = useState(readHidden)
   const g = GUIDES[ws]
-  if (!g || (hidden[ws] && !forced)) return null
+  if (!g) return null
+  const pos = ws === 'viz' ? 'left-4 top-20' : 'left-[272px] bottom-16'
+  // Once read, the guide folds into a small tab so it never covers the drawing area.
+  if (hidden[ws] && !forced)
+    return (
+      <button className={`absolute ${ws === 'viz' ? 'left-4 top-20' : 'left-[272px] bottom-16'} z-20 glass rounded-full h-7 px-3 text-[11px] text-dim hover:text-white flex items-center gap-1.5 guide-pill`} onClick={() => setUI({ guideOpen: true })} aria-label={`Show tips: ${g.title}`}>
+        <Lightbulb size={12} /> How this works
+      </button>
+    )
   const close = () => {
     const h = { ...hidden, [ws]: true }
     setHidden(h)
@@ -68,7 +76,6 @@ export function Guide() {
       /* fine: the guide just shows again next time */
     }
   }
-  const pos = ws === 'viz' ? 'left-4 top-20' : 'left-[272px] bottom-16'
   return (
     <div className={`absolute ${pos} z-20 w-72 glass guide-card rounded-xl p-4 fade-in shadow-2xl`} role="note">
       <div className="flex items-start gap-2">

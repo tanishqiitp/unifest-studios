@@ -300,3 +300,9 @@ html[data-device="tablet"][data-theme="light"] aside {
     scroll-behavior: auto !important;
   }
 }
+html[data-device="phone"] .guide-pill,
+html[data-device="tablet"] .guide-pill {
+  left: 12px !important;
+  top: auto !important;
+  bottom: 120px !important;
+}
