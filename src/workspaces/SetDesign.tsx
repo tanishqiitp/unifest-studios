@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Safe3D } from '../components/Safe3D'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { real } from '../lib/theme'
 import { Arc, Arrow, Circle, Ellipse, Group, Image as KImage, Line, Rect, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
@@ -12,7 +13,8 @@ import { applyTheme, buildKit, hasOpening, KITS, newPiece, SET_KINDS, setLedArea
 import { readImage } from './Decor'
 import { Check, Num, Section, Sel, Stat, Txt } from '../components/ui'
 import { fmt } from '../lib/calc'
-import { SetCad3D } from './SetCad3D'
+// The 3D pane (three.js) loads only when a 3D view is opened, keeping the first page load light.
+const SetCad3D = lazy(() => import('./SetCad3D').then((m) => ({ default: m.SetCad3D })))
 import { AlignBar, SnapGuides, useGuides } from '../components/Align'
 import { snapRect } from '../lib/snap'
 
@@ -220,7 +222,13 @@ function SetViews() {
   const draw = layout !== '3d'
   const active = TOOLS.find((t) => t.id === tool)!
   const pane = (v: Layout, compact: boolean) =>
-    v === '3d' ? <SetCad3D compact={compact} onExit={() => setLayout('front')} /> : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
+    v === '3d' ? (
+      <Safe3D onExit={() => setLayout('front')} exitLabel="Use 2D views">
+        <Suspense fallback={<div className="absolute inset-0 flex items-center justify-center text-xs text-mute">Loading 3D…</div>}>
+          <SetCad3D compact={compact} onExit={() => setLayout('front')} />
+        </Suspense>
+      </Safe3D>
+    ) : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
   return (
     <div className="relative flex-1 min-w-0 bg-canvas">
       {layout === 'quad' ? (

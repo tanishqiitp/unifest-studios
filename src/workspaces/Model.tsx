@@ -1,5 +1,5 @@
 import { StudioEnv } from './StudioEnv'
-import { CURVE_PRESETS } from '../lib/curves'
+import { CURVE_PRESETS } from '../lib/curvePresets'
 import { fontState, subscribeFont } from '../lib/text3d'
 import { CAGE_PRESETS, EMPTY_CAGE, hasCage } from '../lib/cage'
 import { BRUSHES, SculptSession, useSculpt } from './Sculpt'

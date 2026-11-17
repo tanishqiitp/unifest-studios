@@ -1,4 +1,4 @@
-import { CURVE_PRESETS } from './curves'
+import { CURVE_PRESETS } from './curvePresets'
 import { instances } from './partArrays'
 import { nanoid } from 'nanoid'
 import type { Part, PartKind, PartMat, Project, Vec3 } from '../types'
