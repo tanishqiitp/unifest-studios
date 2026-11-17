@@ -160,13 +160,14 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 export function quoteLines(p: Project): QuoteLine[] {
   const q = p.quote ?? defaultQuote()
   const days = Math.max(1, q.days || 1)
-  const k = 1 + (q.margin || 0) / 100
+  // Markup: added on top of each rate (not gross margin). 20% markup = 16.7% gross margin.
+  const k = 1 + Math.max(0, q.margin || 0) / 100
   const line = (category: string, item: string, qty: number, unit: string, base: number, single = false): QuoteLine => {
     const rate = r2(base * k)
     return { category, item, qty, unit, rate, days: single ? 1 : days, amount: r2(qty * rate * (single ? 1 : days)) }
   }
   const out = fullEquipment(p).map((r) => line(r.category, r.item, r.qty, r.unit, q.rates[r.item] ?? defaultRate(r), SINGLE_USE.test(r.item)))
-  for (const x of q.extras) out.push(line('Extras', x.item, x.qty, x.unit, x.rate))
+  for (const x of q.extras) out.push(line('Extras', x.item, Math.max(0, x.qty || 0), x.unit, Math.max(0, x.rate || 0)))
   const byDept = new Map<string, number>()
   for (const c of p.crew ?? []) byDept.set(c.dept, (byDept.get(c.dept) ?? 0) + 1)
   for (const [dept, n] of byDept) {
@@ -179,13 +180,23 @@ export function quoteLines(p: Project): QuoteLine[] {
 export function quoteTotals(p: Project) {
   const q = p.quote ?? defaultQuote()
   const subtotal = r2(quoteLines(p).reduce((a, l) => a + l.amount, 0))
-  const discount = r2((subtotal * (q.discount || 0)) / 100)
+  const discount = r2((subtotal * Math.min(100, Math.max(0, q.discount || 0))) / 100)
   const taxable = r2(subtotal - discount)
   const gst = (taxable * q.gstRate) / 100
   const cgst = q.sameState ? r2(gst / 2) : 0
   const sgst = cgst
   const igst = q.sameState ? 0 : r2(gst)
   return { subtotal, discount, taxable, cgst, sgst, igst, total: r2(taxable + cgst + sgst + igst) }
+}
+
+/** Lines with no rate: shown as "Unpriced" and left out of the total, never silently as zero. */
+export const unpriced = (p: Project) => quoteLines(p).filter((l) => !l.rate).length
+
+export function quoteNumber(p: Project) {
+  const q = p.quote ?? defaultQuote()
+  if (q.number) return q.number
+  const d = new Date(p.updatedAt || Date.now())
+  return `Q-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${(p.id ?? 'XXXX').slice(0, 4).toUpperCase()}`
 }
 
 export function quoteCSV(p: Project) {
@@ -219,7 +230,12 @@ export function exportQuotePDF(p: Project) {
   doc.text(`Client GSTIN: ${q.clientGstin || '-'}`, MARGIN, 40)
   doc.text(`Event: ${p.name}${p.eventDate ? `  |  ${p.eventDate}` : ''}`, MARGIN, 45)
   doc.text(`Days: ${q.days}   |   SAC: ${SAC}`, MARGIN, 50)
-  doc.text(`Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`, W - MARGIN, 35, { align: 'right' })
+  const today = new Date()
+  const valid = new Date(today.getTime() + (q.validDays ?? 15) * 86400000)
+  const d = (x: Date) => x.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+  doc.text(`Quotation ${quoteNumber(p)}  ·  Rev ${q.revision ?? 1}${q.status === 'draft' || !q.status ? '  ·  DRAFT' : ''}`, W - MARGIN, 35, { align: 'right' })
+  doc.text(`Date: ${d(today)}`, W - MARGIN, 40, { align: 'right' })
+  doc.text(`Valid until: ${d(valid)}`, W - MARGIN, 45, { align: 'right' })
 
   // One table, with a bold row for each category.
   const body: (string | number | { content: string; colSpan: number; styles: Record<string, unknown> })[][] = []
@@ -229,7 +245,7 @@ export function exportQuotePDF(p: Project) {
       cat = l.category
       body.push([{ content: cat, colSpan: 6, styles: { fontStyle: 'bold', fillColor: [235, 235, 235] } }])
     }
-    body.push([l.item, l.qty, l.unit, money(l.rate), l.days, money(l.amount)])
+    body.push([l.item, l.qty, l.unit, l.rate ? money(l.rate) : 'Unpriced', l.days, l.rate ? money(l.amount) : '-'])
   }
   autoTable(doc, {
     theme: 'grid',
@@ -265,7 +281,7 @@ export function exportQuotePDF(p: Project) {
     doc.setPage(i)
     doc.setFontSize(7)
     doc.setTextColor(120, 120, 120)
-    doc.text('Rates in INR. Indicative quotation; final rates subject to confirmation.', MARGIN, H - 8)
+    doc.text(`Rates in INR, markup included. Amount = qty x rate x days; then discount, then GST.${unpriced(p) ? ` ${unpriced(p)} item(s) unpriced, not in total.` : ''} Indicative; subject to confirmation.`, MARGIN, H - 8)
     doc.text(`${i} / ${n}`, W - MARGIN, H - 8, { align: 'right' })
   }
   doc.save(`${slug(p)}-quotation.pdf`)

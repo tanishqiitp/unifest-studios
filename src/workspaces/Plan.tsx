@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid'
 import { CheckCircle2, Download, FileText, MessageSquare, Plus, RefreshCw, ShieldCheck, Trash2, Truck as TruckIcon, Users, Wand2, Zap } from 'lucide-react'
 import { useStore } from '../store'
 import type { CrewMember, Cue, Project, QuoteSettings } from '../types'
-import { defaultQuote, defaultRate, exportQuotePDF, fullEquipment, quoteCSV, quoteLines, quoteTotals, SAC } from '../lib/quote'
+import { defaultQuote, defaultRate, exportQuotePDF, fullEquipment, quoteCSV, quoteLines, quoteNumber, quoteTotals, SAC, unpriced } from '../lib/quote'
 import { availability, crewSuggestion, generatorPlan, inventoryFromProject, otherProjects, packList, readInventory, writeInventory, type InvItem } from '../lib/resources'
 import { checklistFor, CHECKLIST_DISCLAIMER, crowdCheck, INDIAN_STATES, noiseNote } from '../lib/safety'
 import { download } from '../lib/export/files'
@@ -135,7 +135,7 @@ function QuoteTab({ project }: { project: Project }) {
                         )}
                       </td>
                       <td className="text-right mono">{l.days}</td>
-                      <td className="text-right mono">{inr(l.amount)}</td>
+                      <td className="text-right mono">{l.rate ? inr(l.amount) : <span className="text-warn">Unpriced</span>}</td>
                     </tr>
                   ))}
               </tbody>
@@ -163,7 +163,11 @@ function QuoteTab({ project }: { project: Project }) {
               <span>Total</span>
               <span>{inr(t.total)}</span>
             </div>
-            <div className="text-[10px] text-mute pt-1">SAC {SAC} · rates in INR</div>
+            <div className="text-[10px] text-mute pt-1">
+              {quoteNumber(project)} · rev {q.revision ?? 1} · SAC {SAC} · rates in INR, markup included
+            </div>
+            <div className="text-[10px] text-mute">Order: qty × rate × days → subtotal → discount → GST → total.</div>
+            {unpriced(project) > 0 && <div className="text-[10px] text-warn pt-1">{unpriced(project)} item(s) have no rate and are not in the total. Enter a rate, or leave them as included.</div>}
           </div>
         </Card>
         <Card title="Terms">
@@ -174,9 +178,20 @@ function QuoteTab({ project }: { project: Project }) {
             <div className="grid grid-cols-2 gap-2">
               <Num label="Rental days" value={q.days} onChange={(days) => up({ days: Math.max(1, days) })} int min={1} />
               <Num label="GST" value={q.gstRate} onChange={(gstRate) => up({ gstRate })} unit="%" min={0} max={28} />
-              <Num label="Margin" value={q.margin} onChange={(margin) => up({ margin })} unit="%" min={0} />
-              <Num label="Discount" value={q.discount} onChange={(discount) => up({ discount })} unit="%" min={0} max={100} />
+              <Num label="Markup on rates" value={q.margin} onChange={(margin) => up({ margin: Math.max(0, margin) })} unit="%" min={0} />
+              <Num label="Discount" value={q.discount} onChange={(discount) => up({ discount: Math.min(100, Math.max(0, discount)) })} unit="%" min={0} max={100} />
+              <Num label="Revision" value={q.revision ?? 1} onChange={(revision) => up({ revision: Math.max(1, Math.round(revision)) })} int min={1} />
+              <Num label="Valid for" value={q.validDays ?? 15} onChange={(validDays) => up({ validDays: Math.max(1, Math.round(validDays)) })} unit="days" int min={1} />
             </div>
+            <label className="flex items-center gap-2 text-xs">
+              Status
+              <select className="field h-7 w-auto" value={q.status ?? 'draft'} onChange={(e) => up({ status: e.target.value as 'draft' | 'sent' | 'approved' })}>
+                <option value="draft">Draft estimate</option>
+                <option value="sent">Sent to client</option>
+                <option value="approved">Approved by client</option>
+              </select>
+            </label>
+            {q.margin > 0 && <p className="text-[10px] text-mute">Markup {q.margin}% on cost = {((q.margin / (100 + q.margin)) * 100).toFixed(1)}% gross margin.</p>}
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={q.sameState} onChange={(e) => up({ sameState: e.target.checked })} />
               Client in the same state (CGST + SGST, else IGST)

@@ -224,6 +224,10 @@ export interface QuoteSettings {
   days: number // rental days
   rates: Record<string, number> // INR per unit per day, keyed by item name
   extras: { id: string; item: string; qty: number; unit: string; rate: number }[]
+  number?: string // quotation reference, e.g. Q-20261118-AB12
+  revision?: number // 1, 2, 3… bumped by the user when the client asks for changes
+  validDays?: number // days the quotation stays valid (default 15)
+  status?: 'draft' | 'sent' | 'approved'
 }
 
 export interface Cue {

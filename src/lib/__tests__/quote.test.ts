@@ -63,3 +63,18 @@ describe('quote', () => {
     expect(csv[1]).toContain('"Flag"')
   })
 })
+
+describe('quote clarity', () => {
+  it('applies markup to rates, clamps discount and counts unpriced lines', async () => {
+    const Q = await import('../quote')
+    const { generateProject, TEMPLATES } = await import('../templates')
+    const p = generateProject(TEMPLATES[0])
+    p.quote = { ...Q.defaultQuote(), margin: 20, discount: 250, extras: [{ id: 'x', item: 'Mystery item', qty: 2, unit: 'pcs', rate: 0 }] }
+    const lines = Q.quoteLines(p)
+    const base = Q.defaultRate(Q.fullEquipment(p)[0])
+    expect(lines[0].rate).toBeCloseTo(base * 1.2, 2)
+    expect(Q.quoteTotals(p).taxable).toBe(0) // discount is capped at 100%
+    expect(Q.unpriced(p)).toBeGreaterThan(0)
+    expect(Q.quoteNumber(p)).toMatch(/^Q-\d{8}-/)
+  })
+})
