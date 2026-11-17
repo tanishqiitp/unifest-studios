@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Info } from 'lucide-react'
 
@@ -161,18 +161,67 @@ export function Empty({ title, text, action }: { title: string; text: string; ac
   )
 }
 
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+// Dialog behaviour shared by every pop-up: focus moves inside, Tab stays inside, the page behind is inert,
+// Escape closes, and focus returns to whatever opened it.
+export function useDialog(ref: React.RefObject<HTMLElement | null>, onClose: () => void) {
+  const close = useRef(onClose)
+  close.current = onClose
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', k)
-    return () => window.removeEventListener('keydown', k)
-  }, [onClose])
+    const opener = document.activeElement as HTMLElement | null
+    const root = document.getElementById('root')
+    const wasInert = root?.inert
+    if (root) root.inert = true
+    const focusables = () =>
+      [...(ref.current?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? [])].filter((el) => el.offsetParent !== null)
+    // Prefer the first field; otherwise the dialog itself.
+    const first = focusables().find((el) => el.matches('input,select,textarea')) ?? ref.current
+    first?.focus()
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        close.current()
+      }
+      if (e.key !== 'Tab') return
+      const f = focusables()
+      if (!f.length) return e.preventDefault()
+      const i = f.indexOf(document.activeElement as HTMLElement)
+      if (e.shiftKey && (i <= 0)) {
+        e.preventDefault()
+        f[f.length - 1].focus()
+      } else if (!e.shiftKey && i === f.length - 1) {
+        e.preventDefault()
+        f[0].focus()
+      }
+    }
+    document.addEventListener('keydown', key, true)
+    return () => {
+      document.removeEventListener('keydown', key, true)
+      if (root) root.inert = !!wasInert
+      opener?.focus?.()
+    }
+  }, [ref])
+}
+
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const id = useId()
+  useDialog(ref, onClose)
   // Rendered on <body> so a blurred or transformed parent can't trap the overlay.
   return createPortal(
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onMouseDown={onClose}>
-      <div className={`card fade-in w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[90vh] overflow-auto`} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-line">
-          <div className="font-display font-semibold">{title}</div>
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={id}
+        tabIndex={-1}
+        className={`card fade-in w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[90vh] overflow-auto outline-none`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-line sticky top-0 bg-inherit z-10">
+          <h2 id={id} className="font-display font-semibold">
+            {title}
+          </h2>
           <button className="btn btn-icon" onClick={onClose} aria-label="Close">
             ✕
           </button>

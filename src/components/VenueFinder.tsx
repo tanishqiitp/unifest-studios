@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useDialog } from './ui'
 import { createPortal } from 'react-dom'
 import { BadgeCheck, Building2, Loader2, MapPin, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import { cloudEnabled, deleteVenue, saveVenue, searchVenues, useAuth, VENUE_KINDS, type Venue, type VenueRoom } from '../lib/cloud'
@@ -38,14 +39,11 @@ export function VenueFinder({ onPick, onClose }: { onPick: (v: Venue, r: VenueRo
     }
   }, [q, refresh])
 
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && (editing ? setEditing(null) : onClose())
-    window.addEventListener('keydown', k)
-    return () => window.removeEventListener('keydown', k)
-  }, [editing, onClose])
+  const dlg = useRef<HTMLDivElement>(null)
+  useDialog(dlg, () => (editing ? setEditing(null) : onClose()))
 
   return createPortal(
-    <div className="fixed inset-0 z-50 bg-ink flex flex-col fade-in" role="dialog" aria-label="Venue library">
+    <div ref={dlg} tabIndex={-1} className="fixed inset-0 z-50 bg-ink flex flex-col fade-in outline-none" role="dialog" aria-modal="true" aria-label="Venue library">
       <header className="h-14 shrink-0 flex items-center gap-3 px-5 border-b border-line">
         <Building2 size={16} />
         <div className="font-display font-semibold">Venue library</div>
