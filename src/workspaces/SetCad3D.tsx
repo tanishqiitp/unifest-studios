@@ -1,3 +1,4 @@
+import { Safe3D, useGlCreated } from '../components/Safe3D'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PartsScene } from './Parts3D'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
@@ -17,7 +18,16 @@ export type Cam = 'iso' | 'front' | 'top' | 'side'
 
 // CAD-style 3D viewport: orbit around, click an item, drag the arrows to move it along X, Y or Z.
 // `edit` is the workspace: only its own kind of item can be picked and moved; the rest is reference.
-export function SetCad3D({ compact, edit = 'set' }: { compact?: boolean; edit?: string }) {
+export function SetCad3D(props: { compact?: boolean; edit?: string; onExit?: () => void }) {
+  return (
+    <Safe3D onExit={props.onExit} exitLabel="Use 2D views">
+      <SetCad3DView compact={props.compact} edit={props.edit} />
+    </Safe3D>
+  )
+}
+
+function SetCad3DView({ compact, edit = 'set' }: { compact?: boolean; edit?: string }) {
+  const glCreated = useGlCreated()
   const project = useStore((s) => s.project)
   const sel = useStore((s) => s.ui.selection)
   const { select } = useStore.getState()
@@ -35,6 +45,7 @@ export function SetCad3D({ compact, edit = 'set' }: { compact?: boolean; edit?: 
   return (
     <div className="absolute inset-0">
       <Canvas
+        onCreated={glCreated}
         dpr={[1, 1.5]}
         camera={{ position: [L.cx + 28, 22, L.y + 34], fov: 40, near: 0.1, far: 2000 }}
         onPointerMissed={(e) => e.button === 0 && select(null)}

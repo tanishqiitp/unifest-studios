@@ -1,3 +1,4 @@
+import { useGlCreated } from '../components/Safe3D'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid, OrbitControls, PerformanceMonitor, TransformControls } from '@react-three/drei'
@@ -449,6 +450,7 @@ function QualityPick() {
 // ---------------------------------------------------------------- viewport
 
 function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
+  const glCreated = useGlCreated()
   const project = useStore((s) => s.project)
   const m = useModel()
   const light = useTheme((t) => t.theme === 'light')
@@ -479,6 +481,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
   }, [])
   return (
     <Canvas
+      onCreated={glCreated}
       frameloop={video ? 'always' : 'demand'}
       dpr={dpr}
       shadows={shadows}

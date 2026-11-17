@@ -1,3 +1,4 @@
+import { useGlCreated } from '../components/Safe3D'
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { PartsScene } from './Parts3D'
 import { useContent } from '../lib/useContent'
@@ -58,6 +59,7 @@ export function Viz3DWorkspace() {
 }
 
 export function Viewer({ project, compact }: { project: Project; compact?: boolean }) {
+  const glCreated = useGlCreated()
   const [preset, setPreset] = useState<Preset>('audience')
   const [camReq, setCamReq] = useState(0)
   const [look, setLook] = useState<Look>('show')
@@ -196,6 +198,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   return (
     <div className={`relative h-full w-full overflow-hidden ${nav === 'grab' ? 'cursor-grab active:cursor-grabbing' : ''}`} style={{ background: bg }}>
       <Canvas
+        onCreated={glCreated}
         shadows={quality === 'best' || (quality === 'show' && !lowPower)}
         dpr={quality === 'draft' ? 1 : quality === 'show' ? [1, 1.25] : [1, 2]}
         gl={{ preserveDrawingBuffer: true, antialias: true, powerPreference: 'high-performance' }}

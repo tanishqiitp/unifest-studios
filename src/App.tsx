@@ -1,3 +1,4 @@
+import { AppCrash, ErrorBoundary, Safe3D } from './components/Safe3D'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
@@ -74,7 +75,10 @@ function SharedView() {
   useEffect(() => {
     if (code) {
       // Short links fetch the latest version of the design each time they open.
-      fetchShare(code).then((x) => (setP(x), setLoading(false)))
+      fetchShare(code)
+        .then((x) => setP(x))
+        .catch(() => setP(null))
+        .finally(() => setLoading(false))
       return
     }
     const h = () => setP(readShareHash())
@@ -94,9 +98,11 @@ function SharedView() {
         <div className="text-[11px] text-mute hidden sm:block">Interactive 3D preview · designed with Unifest Studios</div>
       </header>
       <div className="flex-1 min-h-0 relative">
-        <Suspense fallback={<Loading3D />}>
-          <Viewer project={p} compact />
-        </Suspense>
+        <Safe3D>
+          <Suspense fallback={<Loading3D />}>
+            <Viewer project={p} compact />
+          </Suspense>
+        </Safe3D>
         {code && <ClientFeedback code={code} />}
       </div>
     </div>
@@ -145,25 +151,31 @@ function Studio() {
     <div className="h-full flex flex-col">
       <TopBar />
       <div className="relative flex-1 min-h-0">
+        <ErrorBoundary key={ui.workspace} where={`workspace ${ui.workspace}`} fallback={(_, reset) => <AppCrash onHome={() => (useStore.getState().setUI({ workspace: 'ground' }), reset())} />}>
         {ui.workspace === 'ground' && <GroundWorkspace />}
         {ui.workspace === 'stage' && <StageWorkspace />}
         {ui.workspace === 'truss' && <TrussWorkspace />}
         {ui.workspace === 'led' && <LedWorkspace />}
         {ui.workspace === 'seating' && <SeatingWorkspace />}
         {ui.workspace === 'viz' && (
-          <Suspense fallback={<Loading3D />}>
-            <Viz3DWorkspace />
-          </Suspense>
+          <Safe3D onExit={() => useStore.getState().setUI({ workspace: 'ground' })} exitLabel="Back to Ground plan">
+            <Suspense fallback={<Loading3D />}>
+              <Viz3DWorkspace />
+            </Suspense>
+          </Safe3D>
         )}
         {ui.workspace === 'decor' && <DecorWorkspace />}
         {ui.workspace === 'model' && (
-          <Suspense fallback={<Loading3D />}>
-            <ModelWorkspace />
-          </Suspense>
+          <Safe3D onExit={() => useStore.getState().setUI({ workspace: 'set' })} exitLabel="Back to Set Design">
+            <Suspense fallback={<Loading3D />}>
+              <ModelWorkspace />
+            </Suspense>
+          </Safe3D>
         )}
         {ui.workspace === 'set' && <SetDesignWorkspace />}
         {ui.workspace === 'plan' && <PlanWorkspace />}
         {ui.workspace === 'deliver' && <DeliverWorkspace />}
+        </ErrorBoundary>
         {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <Hud />}
         {['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor'].includes(ui.workspace) && <ToolRail />}
         {compact && ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor', 'model'].includes(ui.workspace) && <PanelToggles />}

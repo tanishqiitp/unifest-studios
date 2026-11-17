@@ -40,7 +40,7 @@ export function CadShell({ ws, home, children, extraBar }: { ws: string; home: F
   const [layout, setLayout] = useCadLayout(ws, home)
   const pane = (v: CadLayout, compact: boolean) => {
     if (v === home) return children
-    if (v === '3d') return <SetCad3D compact={compact} edit={ws} />
+    if (v === '3d') return <SetCad3D compact={compact} edit={ws} onExit={() => setLayout(home)} />
     return <FlatPane view={v as FlatView} ws={ws} compact={compact} />
   }
   return (

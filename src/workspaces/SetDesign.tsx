@@ -220,7 +220,7 @@ function SetViews() {
   const draw = layout !== '3d'
   const active = TOOLS.find((t) => t.id === tool)!
   const pane = (v: Layout, compact: boolean) =>
-    v === '3d' ? <SetCad3D compact={compact} /> : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
+    v === '3d' ? <SetCad3D compact={compact} onExit={() => setLayout('front')} /> : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
   return (
     <div className="relative flex-1 min-w-0 bg-canvas">
       {layout === 'quad' ? (
