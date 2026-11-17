@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ThemeToggle } from './ThemeToggle'
+import { SiteSections } from './SiteSections'
 import { ArrowRight, Box, Building2, Users, Cloud, CloudUpload, Copy, FileText, FolderOpen, Layers, MonitorPlay, Plus, Ruler, Trash2, Sparkles, ClipboardList } from 'lucide-react'
 import { useStore } from '../store'
 import type { Project } from '../types'
@@ -56,6 +57,9 @@ function ago(t: number) {
   const d = Math.round(h / 24)
   return d < 30 ? `${d} d ago` : new Date(t).toLocaleDateString('en-IN')
 }
+
+// Anchor ids for the feature cards, in order (footer links point here).
+const FEATURE_IDS = ['ground', 'stage', 'truss', 'led', 'seating', 'decor', '3d', 'plan', 'deliver']
 
 export function Home() {
   const { setUI, setProject, notify } = useStore.getState()
@@ -116,12 +120,12 @@ export function Home() {
       <header className="h-14 flex items-center justify-between px-3 sm:px-6 border-b border-line sticky top-0 bg-ink/90 backdrop-blur z-10">
         <div className="flex items-center gap-2 select-none">
           <div className="h-7 w-7 rounded-lg bg-white text-black flex items-center justify-center font-display font-bold text-sm">U</div>
-          <div className="leading-none">
+          <div className="leading-none hidden min-[400px]:block">
             <div className="font-display font-semibold text-[13px] tracking-tight">UNIFEST</div>
             <div className="text-[8px] tracking-[0.3em] text-mute">STUDIOS</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 min-w-0">
           <AccountButton />
           <ThemeToggle />
           <button className="btn" onClick={() => setUI({ venuesOpen: true })}>
@@ -181,7 +185,7 @@ export function Home() {
           </div>
         </section>
 
-        <section className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2 pb-12">
+        <section id="features" className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2 pb-12 scroll-mt-20">
           {(
             [
               [<Layers size={15} key="i" />, 'Ground plan', 'Zones, capacity, sightlines'],
@@ -195,7 +199,7 @@ export function Home() {
               [<FileText size={15} key="i" />, 'Deliver', 'Client link, PDF, DXF, XML'],
             ] as const
           ).map(([icon, t, s], i) => (
-            <div key={t} className="rounded-xl border border-line p-3">
+            <div key={t} id={`feature-${FEATURE_IDS[i]}`} className="rounded-xl border border-line p-3 scroll-mt-20 target:border-white">
               <div className="flex items-center justify-between text-mute">
                 {icon}
                 <span className="mono text-[10px]">0{i + 1}</span>
@@ -275,7 +279,7 @@ export function Home() {
           </section>
         )}
 
-        <section className="pb-20">
+        <section id="templates" className="pb-20 scroll-mt-20">
           <h2 className="font-display text-xl font-semibold">Start from a template</h2>
           <p className="text-xs text-mute mt-0.5 mb-4">Complete, safe starting layouts. Every part is editable.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -296,6 +300,7 @@ export function Home() {
           </div>
         </section>
       </div>
+      <SiteSections />
     </div>
   )
 }

@@ -240,3 +240,27 @@ export async function deleteVenue(id: string) {
   const { error } = await need().from('venues').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
+
+// ---------- home page forms (private tables; see supabase/migrations/20261117000000_newsletter_testimonials.sql) ----------
+
+const notConfigured = 'Sign-ups are not connected yet. Please email info@unifestentertainment.com instead.'
+function friendly(e: { message?: string; code?: string } | null) {
+  if (!e) return 'Something went wrong. Please try again.'
+  // Function missing on the server: the migration has not been applied.
+  if (e.code === 'PGRST202' || /could not find the function/i.test(e.message ?? '')) return notConfigured
+  return e.message || 'Something went wrong. Please try again.'
+}
+
+export async function subscribeNewsletter(email: string): Promise<'subscribed' | 'already'> {
+  if (!supabase) throw new Error(notConfigured)
+  const { data, error } = await supabase.rpc('subscribe_newsletter', { email, source: 'home' })
+  if (error) throw new Error(friendly(error))
+  if (data !== 'subscribed' && data !== 'already') throw new Error('Something went wrong. Please try again.')
+  return data
+}
+
+export async function submitTestimonial(f: { name: string; email: string; role: string; body: string; rating: number | null; consent: boolean }) {
+  if (!supabase) throw new Error(notConfigured)
+  const { error } = await supabase.rpc('submit_testimonial', { name: f.name, email: f.email, role: f.role, body: f.body, rating: f.rating, consent: f.consent })
+  if (error) throw new Error(friendly(error))
+}

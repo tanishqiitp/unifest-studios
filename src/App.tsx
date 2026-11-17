@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
-import { AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { Info, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -353,6 +354,7 @@ function TopBar() {
         />
         <AccountButton />
         <ThemeToggle />
+        <CompanyButton />
         {!phone && (
           <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
             <HelpCircle size={14} />
@@ -669,3 +671,16 @@ function useShortcuts() {
   }, [])
 }
 
+
+// Contact details, feedback and company info, kept out of the canvas.
+function CompanyButton() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button className="btn btn-icon" title="Help & company" aria-label="Help and company information" onClick={() => setOpen(true)}>
+        <Info size={14} />
+      </button>
+      {open && <CompanyPanel onClose={() => setOpen(false)} />}
+    </>
+  )
+}
