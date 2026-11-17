@@ -88,7 +88,7 @@ export function ViewBar({ layout, setLayout, extra, quad }: { layout: CadLayout;
 
 function PaneLabel({ view, compact }: { view: FlatView; compact: boolean }) {
   return (
-    <div className={`absolute ${compact ? 'top-2 right-2' : 'top-4 right-4'} glass rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-widest text-dim pointer-events-none z-10`}>
+    <div className={`absolute ${compact ? 'top-2 right-2' : 'top-[68px] right-4'} glass rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-widest text-dim pointer-events-none z-10`}>
       {NAME[view]} <span className="text-mute normal-case tracking-normal">· {AXES[view][0]} · {AXES[view][1]}</span>
     </div>
   )
