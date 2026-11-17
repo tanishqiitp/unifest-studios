@@ -6,7 +6,7 @@ import type { Decor, DecorKind } from '../types'
 import { PlanCanvas } from '../components/PlanCanvas'
 import { TopView } from '../components/TopView'
 import { stageBounds } from '../lib/calc'
-import { DECOR, DECOR_GROUPS, decorPreset, newDecor } from '../lib/decor'
+import { DECOR, DECOR_GROUPS, decorPreset, freeSpot, newDecor } from '../lib/decor'
 import { deleteModel, MAX_MODEL_MB, saveModel } from '../lib/models'
 import { Check, Num, Section, Stat, Txt } from '../components/ui'
 
@@ -40,19 +40,26 @@ export function DecorWorkspace() {
   const sb = stageBounds(project)
   const decor = project.decor ?? []
 
-  const add = (kind: DecorKind) =>
+  // New pieces go in front of the stage, beside earlier ones rather than on top of them.
+  const add = (kind: DecorKind) => {
+    let id = ''
     mutate((p) => {
       const b = stageBounds(p)
       const x = b ? b.x + b.w / 2 : p.venue.w / 2
       const y = b ? b.y + b.l + 2 : p.venue.l / 2
       const d = newDecor(kind, x, y)
+      Object.assign(d, freeSpot(p, d.w, d.d, x, y))
       ;(p.decor ??= []).push(d)
-      setTimeout(() => select({ kind: 'decor', id: d.id }))
+      id = d.id
     })
+    if (id) select({ kind: 'decor', id })
+  }
 
+  // Applying a preset again replaces the pieces it added last time instead of stacking a second set.
   const preset = (k: Parameters<typeof decorPreset>[1], msg: string) => {
-    mutate((p) => void (p.decor = [...(p.decor ?? []), ...decorPreset(p, k)]))
-    notify(msg)
+    const again = (project.decor ?? []).some((d) => d.preset === k)
+    mutate((p) => void (p.decor = [...(p.decor ?? []).filter((d) => d.preset !== k), ...decorPreset(p, k).map((d) => ({ ...d, preset: k }))]))
+    notify(again ? `${msg} (replaced the earlier set)` : msg)
   }
 
   return (
@@ -143,7 +150,8 @@ function DecorProps({ d }: { d: Decor }) {
             title="Duplicate"
             onClick={() =>
               mutate((p) => {
-                const c = { ...structuredClone(d), id: Math.random().toString(36).slice(2, 10), x: d.x + d.w + 0.5 }
+                const c = { ...structuredClone(d), id: Math.random().toString(36).slice(2, 10), preset: undefined }
+                Object.assign(c, freeSpot(p, d.w, d.d, d.x + d.w + 0.5, d.y))
                 p.decor!.push(c)
                 setTimeout(() => select({ kind: 'decor', id: c.id }))
               })
@@ -285,6 +293,7 @@ function ModelImport() {
   const [busy, setBusy] = useState(false)
   const file = useRef<HTMLInputElement>(null)
   const go = async (f: File, asVenue: boolean) => {
+    if (busy) return
     setBusy(true)
     try {
       const m = await saveModel(f)

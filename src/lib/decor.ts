@@ -36,6 +36,26 @@ export function newDecor(kind: DecorKind, x: number, y: number, extra: Partial<D
   return { id: nanoid(8), kind, x, y, z: kind === 'chandelier' ? 5 : 0, w, d: dd, h, rotation: 0, color: d.color, label: d.name, ...(d.effect ? { intensity: 0.8, fire: true } : {}), ...extra }
 }
 
+// Nearest spot to (x, y) where an item of this footprint does not sit on top of other decor,
+// trying left and right of the start point, then a row further out. Stays inside the venue.
+export function freeSpot(p: Project, w: number, d: number, x: number, y: number, skip?: string): { x: number; y: number } {
+  const items = (p.decor ?? []).filter((o) => o.id !== skip)
+  const clampX = (v: number) => Math.min(Math.max(v, w / 2), Math.max(w / 2, p.venue.w - w / 2))
+  const clampY = (v: number) => Math.min(Math.max(v, d / 2), Math.max(d / 2, p.venue.l - d / 2))
+  const free = (cx: number, cy: number) => items.every((o) => Math.abs(o.x - cx) >= (o.w + w) / 2 + 0.2 || Math.abs(o.y - cy) >= (o.d + d) / 2 + 0.2)
+  const stepX = w + 0.5
+  const stepY = d + 0.5
+  for (let row = 0; row < 6; row++) {
+    for (let i = 0; i < 12; i++) {
+      const k = i === 0 ? 0 : (i % 2 ? 1 : -1) * Math.ceil(i / 2)
+      const cx = clampX(x + k * stepX)
+      const cy = clampY(y + row * stepY)
+      if (free(cx, cy)) return { x: +cx.toFixed(2), y: +cy.toFixed(2) }
+    }
+  }
+  return { x: clampX(x), y: clampY(y) }
+}
+
 // Ready-made arrangements around the stage.
 export function decorPreset(p: Project, kind: 'pyro-front' | 'smoke-wings' | 'co2-row' | 'wedding-stage' | 'sponsor-wall' | 'fireworks-finale'): Decor[] {
   const xs = p.decks.flatMap((d) => [d.x, d.x + d.w])

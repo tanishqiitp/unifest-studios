@@ -310,7 +310,7 @@ function TrussNode({ id, editable, dim }: { id: string; editable: boolean; dim: 
       }
     })
   return (
-    <Group opacity={dim ? 0.55 : 1}>
+    <Group opacity={dim ? 0.3 : 1}>
       <Group x={t.x1} y={t.y1} rotation={(ang * 180) / Math.PI}>
         <Rect
           x={0}
@@ -436,7 +436,7 @@ function TableNode({ t, editable, dim }: { t: Table; editable: boolean; dim: boo
         x={t.x}
         y={t.y}
         rotation={t.rotation}
-        opacity={dim ? 0.55 : 1}
+        opacity={dim ? 0.3 : 1}
         listening={editable}
         draggable={editable && tool === 'select'}
         onPointerDown={(e) => {

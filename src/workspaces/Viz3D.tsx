@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { PartsScene } from './Parts3D'
+import { useContent } from '../lib/useContent'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, PerformanceMonitor, Sky, Stars } from '@react-three/drei'
 import { useDevice } from '../lib/device'
@@ -174,6 +175,16 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   }, [compact])
   const fileRef = useRef<HTMLInputElement>(null)
   const notify = useStore((s) => s.notify)
+  // Free the local file when content stops, is replaced or the view closes.
+  const videoRef = useRef<string | null>(null)
+  const changeVideo = (next: string | null) => {
+    const old = videoRef.current
+    videoRef.current = next
+    setVideo(next)
+    // Let the screens drop the old file before it is released.
+    if (old && old !== next) setTimeout(() => URL.revokeObjectURL(old.replace('#img', '')), 1000)
+  }
+  useEffect(() => () => void (videoRef.current && URL.revokeObjectURL(videoRef.current.replace('#img', ''))), [])
 
   const go = (p: Preset) => {
     setPreset(p)
@@ -215,6 +226,10 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
           onShowcaseStop={() => setShowcase(false)}
           viewCmd={viewCmd}
           nav={nav}
+          onContentError={() => {
+            changeVideo(null)
+            notify('This file cannot be played here. Try an MP4 (H.264) video or a JPG/PNG image.')
+          }}
           onAngles={setAngles}
           dropAt={dropAt}
           quality={quality}
@@ -285,8 +300,14 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
               hidden
               onChange={(e) => {
                 const f = e.target.files?.[0]
-                if (f) setVideo(URL.createObjectURL(f) + (f.type.startsWith('image') ? '#img' : ''))
                 e.target.value = ''
+                if (!f) return
+                const isImg = f.type.startsWith('image') || /\.(jpe?g|png|webp|gif)$/i.test(f.name)
+                if (!isImg && f.type && !document.createElement('video').canPlayType(f.type)) {
+                  notify('This video format cannot play in the browser. Export it as MP4 (H.264) and try again.')
+                  return
+                }
+                changeVideo(URL.createObjectURL(f) + (isImg ? '#img' : ''))
               }}
             />
             <select className="h-8 rounded-lg border border-line bg-raised px-2 text-xs" style={{ width: 'auto' }} title="Draft is fastest for big rigs on basic laptops; Best is sharpest. Auto drops to Draft if the view gets slow." value={qPref} onChange={(e) => pickQuality(e.target.value as QualityPref)}>
@@ -298,7 +319,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
             <button className="btn h-8" title="Fire every effect at once: pyro, CO₂, flames, a strobe flash and the LED flash" onClick={() => (setDropAt(performance.now()), setShowcase(false))}>
               <Zap size={14} /> Drop
             </button>
-            <button className={`btn h-8 ${video ? 'btn-on' : ''}`} title="Play your own video or image on every screen (stays on this computer)" onClick={() => (video ? setVideo(null) : fileRef.current?.click())}>
+            <button className={`btn h-8 ${video ? 'btn-on' : ''}`} title="Play your own video or image on every screen (stays on this computer)" onClick={() => (video ? changeVideo(null) : fileRef.current?.click())}>
               <Film size={14} /> {video ? 'Stop content' : 'Play content'}
             </button>
             <button className="btn h-8" title="High-resolution still from this camera" onClick={() => setShotReq((n) => n + 1)}>
@@ -517,6 +538,7 @@ interface SceneProps {
   onShowcaseStop: () => void
   viewCmd: ViewCmd | null
   nav: Nav
+  onContentError: () => void
   onAngles: (a: Angles) => void
 }
 
@@ -762,7 +784,7 @@ function Scene(props: SceneProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shotReq])
 
-  const content = useContent(video)
+  const content = useContent(video, props.onContentError)
 
   return (
     <>
@@ -1019,33 +1041,6 @@ function Recorder({
 
 // ---------------------------------------------------------------- content and screens
 
-function useContent(src: string | null): THREE.Texture | null {
-  const [tex, setTex] = useState<THREE.Texture | null>(null)
-  useEffect(() => {
-    if (!src) return setTex(null)
-    if (src.endsWith('#img')) {
-      const t = new THREE.TextureLoader().load(src.replace('#img', ''))
-      t.colorSpace = THREE.SRGBColorSpace
-      setTex(t)
-      return () => t.dispose()
-    }
-    const v = document.createElement('video')
-    v.src = src
-    v.loop = true
-    v.muted = true
-    v.playsInline = true
-    v.crossOrigin = 'anonymous'
-    v.play().catch(() => undefined)
-    const t = new THREE.VideoTexture(v)
-    t.colorSpace = THREE.SRGBColorSpace
-    setTex(t)
-    return () => {
-      v.pause()
-      t.dispose()
-    }
-  }, [src])
-  return tex
-}
 
 // Generated test pattern: panel grid, centre cross, name and resolution.
 export function testPattern(s: Screen, pxW: number, pxH: number, cols: number, rows: number, virtual: number[] = []) {
@@ -1104,14 +1099,7 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
   const cols = screenColumns(s, st.panel)
   const cw = st.panel.w / 1000
   const ch = st.panel.h / 1000
-  const [img, setImg] = useState<THREE.Texture | null>(null)
-  useEffect(() => {
-    if (!s.image) return setImg(null)
-    const t = new THREE.TextureLoader().load(s.image)
-    t.colorSpace = THREE.SRGBColorSpace
-    setImg(t)
-    return () => t.dispose()
-  }, [s.image])
+  const img = useContent(s.image ? (s.image.startsWith('data:') ? s.image : s.image + '#img') : null)
   const pattern = useMemo(() => {
     const t = new THREE.CanvasTexture(testPattern(s, st.pxW, st.pxH, s.cols, s.rows))
     t.colorSpace = THREE.SRGBColorSpace
@@ -1127,6 +1115,11 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
         const t = new THREE.Texture(base.image)
         t.colorSpace = THREE.SRGBColorSpace
         t.anisotropy = 8
+        if (base.image instanceof HTMLVideoElement) {
+          // Video frames change every frame: skip mipmaps so uploads stay cheap.
+          t.generateMipmaps = false
+          t.minFilter = THREE.LinearFilter
+        }
         t.repeat.set(1 / s.cols, 1)
         t.offset.set(i / s.cols, 0)
         t.needsUpdate = true
@@ -1136,10 +1129,15 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
   )
   useEffect(() => () => texes.forEach((t) => t.dispose()), [texes])
   const isVideo = base.image instanceof HTMLVideoElement
+  const lastFrame = useRef(-1)
   useFrame(() => {
     if (!isVideo) return
     const v = base.image as HTMLVideoElement
-    if (v.readyState >= 2) for (const t of texes) t.needsUpdate = true
+    // Upload only when the video has moved on to a new frame.
+    if (v.readyState >= 2 && v.currentTime !== lastFrame.current) {
+      lastFrame.current = v.currentTime
+      for (const t of texes) t.needsUpdate = true
+    }
   })
   const virtual = new Set(s.virtual)
   const glow = (look === 'show' ? 1.6 : look === 'day' ? 1.15 : 1) * (s.brightness ?? 1)

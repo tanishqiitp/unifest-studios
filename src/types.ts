@@ -173,6 +173,7 @@ export interface Decor {
   wire?: boolean // show as wireframe
   proxy?: boolean // show only a box (for very heavy models)
   hidden?: string[] // names of model parts switched off
+  preset?: string // added by a ready-made arrangement (re-applying it replaces these)
 }
 
 // Scenic set pieces, designed in the front view (Set Design workspace).

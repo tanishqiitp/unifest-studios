@@ -1,3 +1,4 @@
+import { useContent } from '../lib/useContent'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
@@ -34,31 +35,7 @@ export function SetItems({ project, show, dropAt, onInfo, onPick }: { project: P
 
 // One image or video shared by every LED surface.
 export function useSetContent(src?: string) {
-  const [tex, setTex] = useState<THREE.Texture | null>(null)
-  useEffect(() => {
-    if (!src) return setTex(null)
-    if (src.startsWith('data:')) {
-      const t = new THREE.TextureLoader().load(src)
-      t.colorSpace = THREE.SRGBColorSpace
-      setTex(t)
-      return () => t.dispose()
-    }
-    const v = document.createElement('video')
-    v.src = src
-    v.loop = true
-    v.muted = true
-    v.playsInline = true
-    v.crossOrigin = 'anonymous'
-    v.play().catch(() => undefined)
-    const t = new THREE.VideoTexture(v)
-    t.colorSpace = THREE.SRGBColorSpace
-    setTex(t)
-    return () => {
-      v.pause()
-      t.dispose()
-    }
-  }, [src])
-  return tex
+  return useContent(src || null)
 }
 
 // Default LED look when no content is set: a glowing gradient with a panel grid.

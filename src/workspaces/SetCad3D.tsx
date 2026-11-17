@@ -23,6 +23,8 @@ export function SetCad3D({ compact, edit = 'set' }: { compact?: boolean; edit?: 
   const light = useTheme((t) => t.theme === 'light')
   const [mode, setMode] = useState<'translate' | 'rotate'>('translate')
   const [cam, setCam] = useState<{ v: Cam; n: number }>({ v: 'iso', n: 0 })
+  // The item being dragged: its solid is hidden and a preview moves with the arrows instead.
+  const [drag, setDrag] = useState<string | null>(null)
   const kinds = CAD_EDITS[edit] ?? []
   const items = useMemo(() => cadItems(project), [project])
   const piece = edit === 'set' && sel?.kind === 'set' ? project.set?.find((p) => p.id === sel.id && !p.mirrorOf) : undefined
@@ -41,11 +43,11 @@ export function SetCad3D({ compact, edit = 'set' }: { compact?: boolean; edit?: 
         <hemisphereLight args={['#ffffff', light ? '#9a9a9a' : '#202020', light ? 1.8 : 1.4]} />
         <directionalLight position={[L.cx + 20, 40, L.y + 30]} intensity={1.6} />
         <Grid position={[L.cx, 0.001, L.y + 10]} args={[200, 200]} cellSize={1} sectionSize={5} cellColor={light ? '#d6d6d6' : '#1d1d1d'} sectionColor={light ? '#b0b0b0' : '#333333'} fadeDistance={160} infiniteGrid />
-        <Things project={project} pick={pick} />
+        <Things project={project} pick={pick} hide={drag} />
         <SetItems project={project} show={false} dropAt={0} onInfo={() => undefined} onPick={(id) => pick('set', id)} />
         <PartsScene project={project} />
         {piece && <SetHandle s={piece} mode={mode} />}
-        {item && <BoxHandle item={item} />}
+        {item && <BoxHandle item={item} onDrag={setDrag} />}
         <CamRig cam={cam} cx={L.cx} cy={L.y} />
         <GizmoHelper alignment="bottom-right" margin={compact ? [56, 56] : [80, 110]}>
           <GizmoViewport axisColors={['#e5484d', '#46a758', '#3e63dd']} labels={['X', 'Z', 'Y']} labelColor="#000" />
@@ -131,7 +133,7 @@ function SetHandle({ s, mode }: { s: SetPiece; mode: 'translate' | 'rotate' }) {
 }
 
 // Move handle for decks, truss, lights, screens and decor.
-function BoxHandle({ item }: { item: CadItem }) {
+function BoxHandle({ item, onDrag }: { item: CadItem; onDrag: (id: string | null) => void }) {
   const { mutate } = useStore.getState()
   const ref = useRef<THREE.Group>(null)
   const [nonce, setNonce] = useState(0)
@@ -146,39 +148,60 @@ function BoxHandle({ item }: { item: CadItem }) {
     if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 0.001)
       mutate((p) => applyBox(p, item.kind, item.id, b, { x0: b.x0 + dx, x1: b.x1 + dx, y0: b.y0 + dy, y1: b.y1 + dy, z0: b.z0 + dz, z1: b.z1 + dz }))
     setNonce((n) => n + 1)
+    setMoving(false)
+    onDrag(null)
   }
+  const [moving, setMoving] = useState(false)
+  useEffect(() => () => onDrag(null), [onDrag])
   return (
     <>
       <group key={`${item.id}-${nonce}`} ref={ref} position={c}>
-        <SelBox w={b.x1 - b.x0} h={b.z1 - b.z0} d={b.y1 - b.y0} />
+        <SelBox w={b.x1 - b.x0} h={b.z1 - b.z0} d={b.y1 - b.y0} fill={moving ? item.color : undefined} />
       </group>
-      <TransformControls key={`${item.id}-${nonce}`} object={ref as React.RefObject<THREE.Object3D>} mode="translate" size={0.9} translationSnap={0.25} showY={item.kind !== 'deck'} onMouseUp={commit} />
+      <TransformControls
+        key={`${item.id}-${nonce}`}
+        object={ref as React.RefObject<THREE.Object3D>}
+        mode="translate"
+        size={0.9}
+        translationSnap={0.25}
+        showY={item.kind !== 'deck'}
+        onMouseDown={() => (setMoving(true), onDrag(item.id))}
+        onMouseUp={commit}
+      />
     </>
   )
 }
 
-function SelBox({ w, h, d }: { w: number; h: number; d: number }) {
+function SelBox({ w, h, d, fill }: { w: number; h: number; d: number; fill?: string }) {
   const light = useTheme((t) => t.theme === 'light')
   return (
-    <mesh>
-      <boxGeometry args={[w + 0.1, h + 0.1, d + 0.1]} />
-      <meshBasicMaterial color={light ? '#000000' : '#ffffff'} wireframe transparent opacity={0.6} />
-    </mesh>
+    <>
+      <mesh>
+        <boxGeometry args={[w + 0.1, h + 0.1, d + 0.1]} />
+        <meshBasicMaterial color={light ? '#000000' : '#ffffff'} wireframe transparent opacity={0.6} />
+      </mesh>
+      {fill && (
+        <mesh>
+          <boxGeometry args={[w, h, d]} />
+          <meshStandardMaterial color={fill} roughness={0.7} transparent opacity={0.85} />
+        </mesh>
+      )}
+    </>
   )
 }
 
 // Decks, truss, lights, screens and decor as simple solids (the 3D Visualizer shows the full look).
-export function Things({ project, pick }: { project: Project; pick: (k: CadKind, id: string) => void }) {
+export function Things({ project, pick, hide }: { project: Project; pick: (k: CadKind, id: string) => void; hide?: string | null }) {
   const on = (k: CadKind, id: string) => (e: ThreeEvent<MouseEvent>) => (e.stopPropagation(), pick(k, id))
   return (
     <group>
-      {project.decks.map((d) => (
+      {project.decks.filter((x) => x.id !== hide).map((d) => (
         <mesh key={d.id} position={[d.x + d.w / 2, d.h / 2, d.y + d.l / 2]} onClick={on('deck', d.id)}>
           <boxGeometry args={[d.w, d.h, d.l]} />
           <meshStandardMaterial color={d.color ?? '#2a2a2a'} roughness={0.8} />
         </mesh>
       ))}
-      {project.truss.map((t) => {
+      {project.truss.filter((x) => x.id !== hide).map((t) => {
         const len = Math.hypot(t.x2 - t.x1, t.y2 - t.y1)
         const size = t.type === 'box40' ? 0.4 : 0.3
         const col = t.finish === 'black' ? '#2a2a2a' : t.finish === 'white' ? '#eeeeee' : '#9a9a9a'
@@ -201,13 +224,13 @@ export function Things({ project, pick }: { project: Project; pick: (k: CadKind,
           </group>
         )
       })}
-      {project.fixtures.map((f) => (
+      {project.fixtures.filter((x) => x.id !== hide).map((f) => (
         <mesh key={f.id} position={[f.x, f.z - 0.22, f.y]} onClick={on('fixture', f.id)}>
           <boxGeometry args={[0.3, 0.4, 0.3]} />
           <meshStandardMaterial color={f.color ?? '#151515'} emissive={f.color ?? '#000'} emissiveIntensity={f.color ? 0.6 : 0} />
         </mesh>
       ))}
-      {project.screens.map((s) => {
+      {project.screens.filter((x) => x.id !== hide).map((s) => {
         const st = screenStats(s, project.customPanels)
         return (
           <group key={s.id} position={[s.x, s.z, s.y]} rotation-y={-THREE.MathUtils.degToRad(s.rotation)} onClick={on('screen', s.id)}>
@@ -218,7 +241,7 @@ export function Things({ project, pick }: { project: Project; pick: (k: CadKind,
           </group>
         )
       })}
-      {(project.decor ?? []).map((d) => (
+      {(project.decor ?? []).filter((x) => x.id !== hide).map((d) => (
         <mesh key={d.id} position={[d.x, d.z + d.h / 2, d.y]} rotation-y={-THREE.MathUtils.degToRad(d.rotation)} onClick={on('decor', d.id)}>
           <boxGeometry args={[d.w, d.h, d.d]} />
           <meshStandardMaterial color={d.color} roughness={0.7} transparent opacity={0.85} />
