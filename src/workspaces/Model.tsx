@@ -28,8 +28,8 @@ import {
   Unlock,
 } from 'lucide-react'
 import { redo, undo, useStore } from '../store'
-import type { Part, PartArray, PartKind, Vec3 } from '../types'
-import { ASSEMBLIES, buildAssembly, childrenOf, duplicate, EXTRUDE_PRESETS, groupParts, LATHE_PRESETS, MAT_PRESETS, newPart, PART_KINDS, partArea, removeParts, ungroup } from '../lib/parts'
+import type { Part, PartArray, PartKind, PartMat, Vec3 } from '../types'
+import { ASSEMBLIES, buildAssembly, childrenOf, descendants, duplicate, EXTRUDE_PRESETS, groupParts, LATHE_PRESETS, MAT_PRESETS, newPart, PART_KINDS, partArea, removeParts, ungroup } from '../lib/parts'
 import { setLine } from '../lib/setpieces'
 import { useTheme } from '../lib/theme'
 import { fmt } from '../lib/calc'
@@ -75,6 +75,20 @@ export const useModel = create<ModelUI>((set) => ({
 
 const parts = () => useStore.getState().project.parts ?? []
 const editParts = (fn: (ps: Part[]) => Part[]) => useStore.getState().mutate((p) => void (p.parts = fn(p.parts ?? [])))
+// Whole-group colour schemes: parts take the palette's materials in turn; LED surfaces are left as they are.
+const PALETTES: Record<string, PartMat[]> = {
+  'Industrial silver': [MAT_PRESETS['Brushed steel'], MAT_PRESETS['Matte black'], MAT_PRESETS.Chrome],
+  'Dark futuristic': [{ color: '#0b0b10', metal: 0.6, rough: 0.35 }, { color: '#00e5ff', metal: 0, rough: 0.4, glow: 2 }, { color: '#1a1a24', metal: 0.8, rough: 0.2 }],
+  'White & gold': [MAT_PRESETS['Gloss white'], MAT_PRESETS.Gold, MAT_PRESETS['Gloss white']],
+  'Black & hot pink': [MAT_PRESETS['Matte black'], MAT_PRESETS['Neon glow'], { color: '#2a0a1a', metal: 0.3, rough: 0.5 }],
+}
+function recolour(groupId: string, pal: PartMat[]) {
+  editParts((ps) => {
+    const ids = new Set(descendants(ps, groupId).map((x) => x.id))
+    let i = 0
+    return ps.map((x) => (ids.has(x.id) && x.kind !== 'group' && !x.mat.led ? { ...x, mat: { ...pal[i++ % pal.length], map: x.mat.map } } : x))
+  })
+}
 const updatePart = (id: string, patch: Partial<Part>) => editParts((ps) => ps.map((x) => (x.id === id ? { ...x, ...patch } : x)))
 
 // Clicking selects the outermost group (like picking an object); double-click picks the exact part.
@@ -752,6 +766,30 @@ function Props({ p }: { p: Part }) {
             </label>
           )}
           {(p.kind === 'lathe' || p.kind === 'extrude') && <ProfileEditor p={p} />}
+          {p.kind !== 'plane' && p.kind !== 'text' && (
+            <div className="grid grid-cols-2 gap-2">
+              <Num label="Taper (top size)" value={p.taper ?? 1} onChange={(taper) => up({ taper: Math.max(0, Math.min(3, taper)) })} step={0.05} tip="1 = straight sides, 0.5 = half as wide at the top (angled towers), 0 = a point." />
+              <Num label="Twist" value={p.twist ?? 0} onChange={(twist) => up({ twist: Math.max(-720, Math.min(720, twist)) })} unit="°" step={15} tip="Turn the top relative to the bottom: twisted columns and flowing forms." />
+            </div>
+          )}
+        </Section>
+      )}
+
+      {isGroup && (
+        <Section title="Recolour the whole group">
+          <p className="text-[11px] text-mute">Change every part inside at once. LED surfaces keep their content.</p>
+          <div className="grid grid-cols-2 gap-1">
+            {Object.entries(PALETTES).map(([name, pal]) => (
+              <button key={name} className="btn h-8 text-[11px] justify-start" onClick={() => recolour(p.id, pal)}>
+                <span className="flex gap-0.5">
+                  {pal.map((m, i) => (
+                    <span key={i} className="h-3 w-3 rounded-sm border border-line" style={{ background: m.color }} />
+                  ))}
+                </span>
+                {name}
+              </button>
+            ))}
+          </div>
         </Section>
       )}
 
@@ -811,6 +849,16 @@ function Props({ p }: { p: Part }) {
         {p.array && p.array.count > 1 && (
           <>
             <Num label="Copies" value={p.array.count} onChange={(count) => up({ array: { ...p.array!, count: Math.round(Math.max(2, Math.min(200, count))) } })} step={1} int />
+            <div className="grid grid-cols-2 gap-2">
+              <Num label="Grow each copy" value={Math.round((p.array.grow ?? 0) * 100)} onChange={(g) => up({ array: { ...p.array!, grow: Math.max(-90, Math.min(200, g)) / 100 } })} unit="%" step={5} tip="Each copy is taller (or shorter) than the last: fins that rise towards the outside." />
+              <Num label="Turn each copy" value={p.array.turn ?? 0} onChange={(turn) => up({ array: { ...p.array!, turn } })} unit="°" step={5} />
+            </div>
+            {p.array.mode === 'linear' && <Check label="Both ways, mirrored (symmetric)" checked={!!p.array.symmetric} onChange={(symmetric) => up({ array: { ...p.array!, symmetric } })} tip="Copies spread out on both sides of the original, the far side mirrored." />}
+            <label className="flex items-center gap-2 text-[11px]">
+              <input type="checkbox" checked={!!p.array.alt} onChange={(e) => up({ array: { ...p.array!, alt: e.target.checked ? '#ff2d95' : undefined } })} />
+              Alternate colour
+              {p.array.alt && <input type="color" value={p.array.alt} onChange={(e) => up({ array: { ...p.array!, alt: e.target.value } })} className="h-6 w-8 bg-transparent" aria-label="Alternate colour" />}
+            </label>
             {p.array.mode === 'linear' ? (
               <Vec label="Step between copies" unit="m" v={p.array.offset} step={0.25} onChange={(i, n) => up({ array: { ...p.array!, offset: p.array!.offset.map((x, j) => (j === i ? n : x)) as Vec3 } })} />
             ) : (

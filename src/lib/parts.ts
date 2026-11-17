@@ -158,8 +158,9 @@ export function partArea(p: Part) {
 
 // ---------- ready-made assemblies ----------
 
-export type AssemblyId = 'staircase' | 'colonnade' | 'podium' | 'chandelier' | 'portal' | 'dome-pavilion'
+export type AssemblyId = 'festival' | 'staircase' | 'colonnade' | 'podium' | 'chandelier' | 'portal' | 'dome-pavilion'
 export const ASSEMBLIES: { id: AssemblyId; name: string; blurb: string }[] = [
+  { id: 'festival', name: 'Festival stage', blurb: 'Platform, centre LED in three nested arches, mirrored wings with rising fins, angled towers' },
   { id: 'staircase', name: 'Grand staircase', blurb: 'Wide steps with side walls, up to the stage' },
   { id: 'colonnade', name: 'Colonnade', blurb: 'Row of turned columns made with Array' },
   { id: 'podium', name: 'Tiered podium', blurb: 'Three round tiers with glowing edges' },
@@ -175,7 +176,29 @@ export function buildAssembly(p: Project, id: AssemblyId): Part[] {
   const kid = (kind: PartKind, pos: Vec3, extra: Partial<Part> = {}) => newPart(kind, pos, { parent: g.id, ...extra })
   const gold = MAT_PRESETS.Gold
   let kids: Part[] = []
-  if (id === 'staircase') {
+  if (id === 'festival') {
+    // A tree: select the whole stage, one wing, or one panel. Every size stays editable.
+    g.pos = [L.cx, L.front - 6, 0]
+    const sub = (name: string, pos: Vec3) => newPart('group', pos, { parent: g.id, name })
+    const platform = kid('box', [0, 0, 0], { name: 'Platform', w: 24, d: 10, h: 1.5, mat: MAT_PRESETS['Matte black'] })
+    const centre = sub('Centre structure', [0, -3.5, 1.5])
+    const inC = (kind: PartKind, pos: Vec3, extra: Partial<Part>) => newPart(kind, pos, { parent: centre.id, ...extra })
+    const centreKids = [
+      inC('box', [0, -0.6, 0], { name: 'Main LED', w: 10, d: 0.2, h: 5.6, mat: MAT_PRESETS['LED content'] }),
+      ...[0, 1, 2].map((i) => inC('extrude', [0, 0.4 - i * 0.5, 0], { name: `Arch ${i + 1}`, w: 12 + i * 2.5, d: 0.35, h: 7.5 + i * 1.2, profile: EXTRUDE_PRESETS.Arch, bevel: 0.04, mat: i === 0 ? MAT_PRESETS['Neon glow'] : MAT_PRESETS['Brushed steel'] })),
+    ]
+    const wing = (side: 1 | -1) => {
+      const w = sub(side < 0 ? 'Left wing' : 'Right wing', [side * 9.5, -3.5, 1.5])
+      const inW = (kind: PartKind, pos: Vec3, extra: Partial<Part>) => newPart(kind, pos, { parent: w.id, ...extra })
+      return [
+        w,
+        inW('box', [0, -0.3, 0], { name: 'Side LED', w: 4, d: 0.2, h: 3.5, mat: MAT_PRESETS['LED content'] }),
+        inW('box', [side * -1.8, 0.3, 0], { name: 'Fins', w: 0.25, d: 0.8, h: 3.2, taper: 0.15, mat: MAT_PRESETS['Brushed steel'], array: { mode: 'linear', count: 6, offset: [side * 0.75, 0, 0], grow: 0.12 } }),
+      ]
+    }
+    const towers = [-1, 1].map((sd) => kid('box', [sd * 13.5, -4.5, 0], { name: sd < 0 ? 'Left tower' : 'Right tower', w: 1.6, d: 1.6, h: 13, taper: 0.45, rot: [0, sd * -4, 0], mat: MAT_PRESETS['Brushed steel'] }))
+    kids = [platform, centre, ...centreKids, ...wing(-1), ...wing(1), ...towers]
+  } else if (id === 'staircase') {
     const h = Math.max(0.6, L.deckH || 1.2)
     g.pos = [L.cx, L.front, 0]
     kids = [

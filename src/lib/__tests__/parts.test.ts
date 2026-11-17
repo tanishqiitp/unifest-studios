@@ -55,3 +55,26 @@ describe('3D parts', () => {
     expect(liteProject(p, true).parts?.[0].mat.map).toBeDefined()
   })
 })
+
+describe('festival stage builder', () => {
+  it('builds an editable tree: stage → centre and wings → panels', async () => {
+    const { buildAssembly, childrenOf } = await import('../parts')
+    const { generateProject, TEMPLATES } = await import('../templates')
+    const parts = buildAssembly(generateProject(TEMPLATES[0]), 'festival')
+    const root = parts.find((x) => !x.parent)!
+    const names = childrenOf(parts, root.id).map((x) => x.name)
+    expect(names).toEqual(expect.arrayContaining(['Platform', 'Centre structure', 'Left wing', 'Right wing', 'Left tower', 'Right tower']))
+    const centre = parts.find((x) => x.name === 'Centre structure')!
+    expect(childrenOf(parts, centre.id).filter((x) => /Arch/.test(x.name))).toHaveLength(3)
+  })
+  it('arrays grow, mirror symmetrically and alternate', async () => {
+    const { instances } = await import('../partArrays')
+    const { newPart } = await import('../parts')
+    const p = newPart('box', [0, 0, 0], { array: { mode: 'linear', count: 5, offset: [1, 0, 0], grow: 0.1, symmetric: true, alt: '#fff' } })
+    const ins = instances(p)
+    expect(ins).toHaveLength(5)
+    expect(ins.filter((i) => i.flip)).toHaveLength(2)
+    expect(Math.max(...ins.map((i) => i.sy))).toBeCloseTo(1.2)
+    expect(ins.some((i) => i.alt)).toBe(true)
+  })
+})

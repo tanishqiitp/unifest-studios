@@ -1,3 +1,4 @@
+import { instances } from '../lib/partArrays'
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
@@ -17,7 +18,31 @@ export type Shading = 'solid' | 'material' | 'wire' | 'xray'
 
 // ---------- geometry (origin at the bottom centre; x across, y up, z depth) ----------
 
+// Taper and twist bend the shape along its height; editable at any time because they are applied on build.
 export function partGeometry(p: Part): THREE.BufferGeometry | null {
+  const deform = (p.taper !== undefined && Math.abs(p.taper - 1) > 1e-3) || !!p.twist
+  const g = baseGeometry(p, deform)
+  if (!g || !deform) return g
+  const pos = g.getAttribute('position')
+  const box = new THREE.Box3().setFromBufferAttribute(pos as THREE.BufferAttribute)
+  const y0 = box.min.y
+  const span = Math.max(1e-6, box.max.y - y0)
+  const taper = p.taper ?? 1
+  const tw = THREE.MathUtils.degToRad(p.twist ?? 0)
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) - y0) / span
+    const k = 1 + (taper - 1) * t
+    const a = tw * t
+    const x = pos.getX(i) * k
+    const z = pos.getZ(i) * k
+    pos.setXYZ(i, x * Math.cos(a) - z * Math.sin(a), pos.getY(i), x * Math.sin(a) + z * Math.cos(a))
+  }
+  pos.needsUpdate = true
+  g.computeVertexNormals()
+  return g
+}
+
+function baseGeometry(p: Part, deform = false): THREE.BufferGeometry | null {
   const { w, h, d } = p
   const seg = Math.max(3, Math.round(p.seg ?? 32))
   let g: THREE.BufferGeometry
@@ -25,7 +50,7 @@ export function partGeometry(p: Part): THREE.BufferGeometry | null {
     case 'group':
       return null
     case 'box':
-      g = p.bevel && p.bevel > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(p.bevel, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d)
+      g = p.bevel && p.bevel > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(p.bevel, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d, deform ? 2 : 1, deform ? 16 : 1, deform ? 2 : 1)
       g.translate(0, h / 2, 0)
       return g
     case 'cylinder':
@@ -216,23 +241,20 @@ export function PartsScene({
   )
 }
 
-function instances(p: Part): { pos: [number, number, number]; rotY: number }[] {
-  const a = p.array
-  if (!a || a.count <= 1) return [{ pos: [0, 0, 0], rotY: 0 }]
-  const n = Math.min(200, Math.max(1, Math.round(a.count)))
-  if (a.mode === 'radial') {
-    const sweep = THREE.MathUtils.degToRad(a.angle ?? 360)
-    const step = Math.abs(sweep - Math.PI * 2) < 1e-3 ? sweep / n : sweep / Math.max(1, n - 1)
-    return Array.from({ length: n }, (_, i) => ({ pos: [0, 0, 0], rotY: i * step }))
-  }
-  return Array.from({ length: n }, (_, i) => ({ pos: toThree([a.offset[0] * i, a.offset[1] * i, a.offset[2] * i]), rotY: 0 }))
-}
-
 function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: boolean }) {
   const ctx = useContext(PartsCtx)!
   const geo = useMemo(() => partGeometry(p), [p])
   useEffect(() => () => geo?.dispose(), [geo])
   const mat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
+  // Alternating copies share one second material in the alternate colour.
+  const altColor = p.array?.alt
+  const altMat = useMemo(() => {
+    if (!altColor || !(mat instanceof THREE.MeshStandardMaterial)) return null
+    const m = mat.clone()
+    m.color.set(altColor)
+    return m
+  }, [mat, altColor])
+  useEffect(() => () => altMat?.dispose(), [altMat])
   const kids = childrenOf(ctx.all, p.id)
   if (p.hidden) return null
   const radius = p.array?.mode === 'radial' ? (p.array.radius ?? 2) : 0
@@ -246,12 +268,12 @@ function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: b
       userData={{ partId: p.id, root }}
     >
       {instances(p).map((ins, i) => (
-        <group key={i} position={ins.pos} rotation-y={ins.rotY}>
+        <group key={i} position={ins.pos} rotation-y={ins.rotY} scale={[ins.flip ? -1 : 1, ins.sy, 1]}>
           <group position={[0, 0, radius]}>
             {geo && (
               <mesh
                 geometry={geo}
-                material={mat}
+                material={ins.alt && altMat ? altMat : mat}
                 castShadow={ctx.shadows}
                 receiveShadow={ctx.shadows}
                 onClick={

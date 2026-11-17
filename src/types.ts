@@ -356,6 +356,10 @@ export interface PartArray {
   offset: Vec3 // linear: step between copies (x, y, z metres)
   radius?: number // radial: distance from the centre
   angle?: number // radial: total sweep in degrees (360 = full circle)
+  grow?: number // each copy is this much taller than the previous (0.1 = +10%); with symmetric, grows outwards
+  turn?: number // each copy turns this many more degrees about the vertical
+  symmetric?: boolean // linear: copies spread both ways from the original, mirrored
+  alt?: string // every other copy uses this colour
 }
 export interface Part {
   id: string
@@ -375,6 +379,8 @@ export interface Part {
   thick?: number // torus tube thickness, metres
   profile?: [number, number][] // lathe (radius, height) or extrude (across, up), 0..1 of the size
   text?: string
+  taper?: number // top size as a fraction of the bottom (1 = straight, 0.3 = pointed)
+  twist?: number // degrees turned from bottom to top
   mat: PartMat
   array?: PartArray
   mirror?: boolean // live copy across the venue centre line (top-level parts)
