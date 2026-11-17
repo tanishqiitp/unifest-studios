@@ -26,14 +26,16 @@ import {
   Maximize2,
   Move3d,
   Rotate3d,
+  PersonStanding,
   Redo2,
   Trash2,
   Undo2,
+  Video,
   Ungroup,
   Unlock,
 } from 'lucide-react'
 import { redo, undo, useStore } from '../store'
-import type { Part, PartArray, PartKind, PartMat, Vec3 } from '../types'
+import type { Part, PartArray, PartKind, PartMat, SavedView, Vec3 } from '../types'
 import { ASSEMBLIES, buildAssembly, childrenOf, descendants, duplicate, EXTRUDE_PRESETS, groupParts, LATHE_PRESETS, MAT_PRESETS, newPart, PART_KINDS, partArea, removeParts, ungroup } from '../lib/parts'
 import { setLine } from '../lib/setpieces'
 import { useTheme } from '../lib/theme'
@@ -62,6 +64,7 @@ interface ModelUI {
   context: boolean
   view: { v: View; n: number }
   frame: number
+  person: boolean // 1.75 m figure for scale
   objs: Record<string, THREE.Object3D>
   set: (p: Partial<ModelUI>) => void
 }
@@ -74,6 +77,7 @@ export const useModel = create<ModelUI>((set) => ({
   context: true,
   view: { v: 'iso', n: 0 },
   frame: 0,
+  person: true,
   objs: {},
   set: (p) => set(p),
 }))
@@ -467,6 +471,10 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
           <Download size={13} />
           <span className="hidden xl:inline">.glb</span>
         </button>
+        <button className={b(m.person)} title="Show a 1.75 m person for scale" onClick={() => m.set({ person: !m.person })} aria-pressed={m.person}>
+          <PersonStanding size={13} />
+        </button>
+        <ViewsMenu />
         <RenderButton name={name} />
       </div>
     </div>
@@ -474,14 +482,95 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
 }
 
 // Live handles to the 3D view for one-off jobs started from the toolbar (still renders).
-const view: { gl?: THREE.WebGLRenderer; scene?: THREE.Scene; camera?: THREE.PerspectiveCamera; invalidate?: () => void } = {}
+const view: { gl?: THREE.WebGLRenderer; scene?: THREE.Scene; camera?: THREE.PerspectiveCamera; invalidate?: () => void; controls?: { target: THREE.Vector3; update: () => void } } = {}
 function ViewBridge() {
-  const { gl, scene, camera, invalidate } = useThree()
+  const { gl, scene, camera, invalidate, controls } = useThree() as unknown as { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; invalidate: () => void; controls: ViewControls | null }
   useEffect(() => {
-    Object.assign(view, { gl, scene, camera: camera as THREE.PerspectiveCamera, invalidate })
-    return () => void Object.assign(view, { gl: undefined, scene: undefined, camera: undefined })
-  }, [gl, scene, camera, invalidate])
+    Object.assign(view, { gl, scene, camera, invalidate, controls: controls ?? undefined })
+    return () => void Object.assign(view, { gl: undefined, scene: undefined, camera: undefined, controls: undefined })
+  }, [gl, scene, camera, invalidate, controls])
   return null
+}
+type ViewControls = { target: THREE.Vector3; update: () => void }
+
+// Stable empty list: a fresh [] in a store selector would re-render forever.
+const NO_VIEWS: SavedView[] = []
+
+// Saved camera views: name the current view, come back to it later. Stored with the project.
+function ViewsMenu() {
+  const [open, setOpen] = useState(false)
+  const views = useStore((s) => s.project.views ?? NO_VIEWS)
+  const { mutate, notify } = useStore.getState()
+  const save = () => {
+    if (!view.camera || !view.controls) return
+    const name = prompt('Name this view', `View ${views.length + 1}`)?.trim()
+    if (!name) return
+    const v = { id: Math.random().toString(36).slice(2, 9), name: name.slice(0, 40), pos: view.camera.position.toArray() as Vec3, target: view.controls.target.toArray() as Vec3 }
+    mutate((p) => void (p.views = [...(p.views ?? []), v]))
+    notify(`Saved view "${v.name}"`)
+  }
+  const go = (v: { pos: Vec3; target: Vec3 }) => {
+    if (!view.camera || !view.controls) return
+    view.camera.position.set(...v.pos)
+    view.controls.target.set(...v.target)
+    view.controls.update()
+    view.invalidate?.()
+    setOpen(false)
+  }
+  return (
+    <div className="relative">
+      <button className="btn h-8 px-2 text-[11px]" title="Save this camera view or go back to a saved one" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Video size={13} />
+        <span className="hidden xl:inline">Views{views.length ? ` (${views.length})` : ''}</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-10 z-30 card p-1 w-56 fade-in" onMouseLeave={() => setOpen(false)}>
+          <button className="w-full text-left px-3 py-2 rounded-md hover:bg-lift text-xs font-medium" onClick={save}>
+            + Save this view
+          </button>
+          {views.length > 0 && <div className="h-px bg-line my-1" />}
+          {views.map((v) => (
+            <div key={v.id} className="flex items-center gap-1">
+              <button className="flex-1 text-left px-3 py-1.5 rounded-md hover:bg-lift text-xs truncate" onClick={() => go(v)}>
+                {v.name}
+              </button>
+              <button className="btn btn-icon h-6 w-6" aria-label={`Delete view ${v.name}`} onClick={() => mutate((p) => void (p.views = (p.views ?? []).filter((x) => x.id !== v.id)))}>
+                <Trash2 size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// A 1.75 m person standing at the stage front, so sizes read at a glance (shown in renders too).
+function ScaleFigure({ x, y, z }: { x: number; y: number; z: number }) {
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#8a8f98', roughness: 0.7 }), [])
+  useEffect(() => () => mat.dispose(), [mat])
+  return (
+    <group position={[x, z, y]} userData={{ scaleFigure: true }}>
+      <mesh material={mat} position={[-0.1, 0.43, 0]}>
+        <capsuleGeometry args={[0.075, 0.7, 4, 12]} />
+      </mesh>
+      <mesh material={mat} position={[0.1, 0.43, 0]}>
+        <capsuleGeometry args={[0.075, 0.7, 4, 12]} />
+      </mesh>
+      <mesh material={mat} position={[0, 1.15, 0]} scale={[1, 1, 0.62]}>
+        <capsuleGeometry args={[0.2, 0.42, 4, 16]} />
+      </mesh>
+      <mesh material={mat} position={[-0.27, 1.12, 0]} rotation-z={0.08}>
+        <capsuleGeometry args={[0.055, 0.55, 4, 10]} />
+      </mesh>
+      <mesh material={mat} position={[0.27, 1.12, 0]} rotation-z={-0.08}>
+        <capsuleGeometry args={[0.055, 0.55, 4, 10]} />
+      </mesh>
+      <mesh material={mat} position={[0, 1.63, 0]}>
+        <sphereGeometry args={[0.115, 20, 16]} />
+      </mesh>
+    </group>
+  )
 }
 
 function RenderButton({ name }: { name: string }) {
@@ -613,6 +702,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
       </group>
       <Gizmo />
       <ViewBridge />
+      {m.person && <ScaleFigure x={L.cx + Math.min(6, L.w / 2 + 1.5)} y={L.front + 1.5} z={0} />}
       <SculptSession part={all.find((p) => p.id === m.sel[m.sel.length - 1])} objs={m.objs} />
       {import.meta.env.DEV && <DevHook />}
       <CamRig cx={L.cx} cy={L.front} />

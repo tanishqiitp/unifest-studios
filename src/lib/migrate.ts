@@ -4,7 +4,7 @@ import type { Project } from '../types'
 
 export const SCHEMA_VERSION = 1
 const LISTS = ['screens', 'ground', 'decks', 'truss', 'hoists', 'fixtures', 'tables', 'guests', 'customPanels'] as const
-const OPTIONAL_LISTS = ['decor', 'set', 'parts', 'cues', 'crew', 'comments'] as const
+const OPTIONAL_LISTS = ['decor', 'set', 'parts', 'cues', 'crew', 'comments', 'views'] as const
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
 const rid = () => Math.random().toString(36).slice(2, 10)

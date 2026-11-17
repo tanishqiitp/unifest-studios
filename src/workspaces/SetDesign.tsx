@@ -33,6 +33,9 @@ export const SKIN_FILL: Record<Skin, string> = {
 const fillOf = (s: Skin, color: string) => real(s === 'paint' || s === 'fabric' || s === 'print' ? color : SKIN_FILL[s])
 
 // CAD-style set designer: front, top and side views plus 3D. Konva's y runs down, so front and side views use y = -height.
+// Stable empty list: a fresh [] in a store selector would re-render forever.
+const NO_SET: SetPiece[] = []
+
 export function SetDesignWorkspace() {
   const project = useStore((s) => s.project)
   const sel = useStore((s) => s.ui.selection)
@@ -535,7 +538,7 @@ function useImg(src?: string) {
 function PieceNode({ s, view, listening }: { s: SetPiece; view: CadView; listening: boolean }) {
   const v = useView()
   const sel = useStore((st) => st.ui.selection)
-  const set = useStore((st) => st.project.set ?? [])
+  const set = useStore((st) => st.project.set ?? NO_SET)
   const deckH = useStore((st) => setLine(st.project).deckH)
   const lineY = useStore((st) => setLine(st.project).y)
   const { mutate, select } = useStore.getState()
@@ -749,7 +752,7 @@ function Bulbs({ s }: { s: SetPiece }) {
 function PieceProps({ s }: { s: SetPiece }) {
   const { mutate, select, notify } = useStore.getState()
   const file = useRef<HTMLInputElement>(null)
-  const set = useStore((st) => st.project.set ?? [])
+  const set = useStore((st) => st.project.set ?? NO_SET)
   const twin = set.find((x) => x.mirrorOf === s.id)
   const src = s.mirrorOf ? set.find((x) => x.id === s.mirrorOf) : undefined
   const up = (patch: Partial<SetPiece>) => mutate((p) => Object.assign(p.set!.find((x) => x.id === s.id)!, patch))

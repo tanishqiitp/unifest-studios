@@ -323,6 +323,7 @@ export interface Project {
   decor?: Decor[]
   set?: SetPiece[]
   parts?: Part[] // free 3D parts from the Model workspace
+  views?: SavedView[] // named camera positions in the Model workspace
   setContent?: string // image (data URL) or video link spread across all LED skins
   brand?: Brand
   quote?: QuoteSettings
@@ -340,6 +341,12 @@ export interface Project {
 // Venue axes: x across, y depth (towards the audience), z up. Geometry origin is the bottom centre.
 export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text' | 'sculpt' | 'path' | 'drape'
 export type Vec3 = [number, number, number]
+export interface SavedView {
+  id: string
+  name: string
+  pos: Vec3 // three.js coordinates
+  target: Vec3
+}
 export interface Cutouts {
   shape: 'circle' | 'square' | 'arch' | 'diamond'
   cols: number
