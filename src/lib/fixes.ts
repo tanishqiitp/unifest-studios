@@ -145,7 +145,11 @@ export function stageFit(p: Project): StageFit | null {
       for (const s of q.screens) if (mainIds.has(s.id)) s.x = r2(s.x + shift)
       for (const m of sideMoves) {
         const s = q.screens.find((x) => x.id === m.id)
-        if (s) s.x = m.x
+        if (!s) continue
+        s.x = m.x
+        // Its mirror follows across the venue centre line (the store does this too; done here so the fix is
+        // complete on its own).
+        for (const mr of q.screens.filter((x) => x.mirrorOf === s.id)) mr.x = r2(q.venue.w - s.x - width(s, q))
       }
       for (const m of trussMoves) {
         const t = q.truss.find((x) => x.id === m.id)
