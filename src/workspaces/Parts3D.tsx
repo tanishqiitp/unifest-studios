@@ -354,7 +354,9 @@ function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: b
   // 3D letters: ask for the font, and rebuild once it has arrived.
   const fontReady = useSyncExternalStore(subscribeFont, fontState)
   useEffect(() => void (p.kind === 'text' && p.solid && requestFont()), [p.kind, p.solid])
-  const geo = useMemo(() => partGeometry(p), [p, fontReady]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Scattered copies are small and many: build them with fewer sides (detail they would not show anyway),
+  // so hundreds of flowers stay light on ordinary laptops.
+  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [p, fontReady]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => geo?.dispose(), [geo])
   const mat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
   // Alternating copies share one second material in the alternate colour.
