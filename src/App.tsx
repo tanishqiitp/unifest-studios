@@ -1,10 +1,11 @@
+import { SavePoints } from './components/SavePoints'
 import { exportProject } from './lib/export/files'
 import { loadSummary } from './lib/loads'
 import { AppCrash, ErrorBoundary, Safe3D } from './components/Safe3D'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
-import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
+import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Undo2 } from 'lucide-react'
 import { redo, saveNow, undo, useSave, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -261,6 +262,7 @@ function TopBar() {
   const { setUI, mutate, notify, setProject } = useStore.getState()
   const file = useRef<HTMLInputElement>(null)
   const [menu, setMenu] = useState(false)
+  const [points, setPoints] = useState(false)
   const device = useDevice((s) => s.kind)
   const pref = useDevice((s) => s.pref)
   const phone = device === 'phone'
@@ -315,6 +317,7 @@ function TopBar() {
           <Redo2 size={14} />
         </button>
         <div className="relative">
+          {points && <SavePoints onClose={() => setPoints(false)} />}
           <button className="btn" onClick={() => setMenu(!menu)}>
             {phone ? <MoreHorizontal size={14} /> : <>File <ChevronDown size={12} /></>}
           </button>
@@ -324,14 +327,15 @@ function TopBar() {
               <MenuItem icon={<Plus size={13} />} label="New event…" onClick={() => (setUI({ wizardOpen: true }), setMenu(false))} />
               <MenuItem
                 icon={<Copy size={13} />}
-                label="Duplicate project"
+                label="Duplicate as a new option"
                 onClick={() => {
                   saveNow()
-                  setProject({ ...structuredClone(project), id: undefined, name: `${project.name} copy`, updatedAt: Date.now() })
-                  notify('Duplicated. You are now editing the copy.')
+                  setProject({ ...structuredClone(project), id: undefined, name: `${project.name} (option B)`, updatedAt: Date.now() })
+                  notify('Copied as a separate option. The original is unchanged in All projects.')
                   setMenu(false)
                 }}
               />
+              <MenuItem icon={<History size={13} />} label="Save points…" onClick={() => (setPoints(true), setMenu(false))} />
               <MenuItem icon={<FolderOpen size={13} />} label="Open .unifest file…" onClick={() => (file.current?.click(), setMenu(false))} />
               <MenuItem icon={<Save size={13} />} label="Save to this browser" hint="Ctrl+S" onClick={() => (saveNow() ? notify('Saved') : notify('Could not save: storage blocked'), setMenu(false))} />
               <div className="h-px bg-line my-1" />

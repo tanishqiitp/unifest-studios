@@ -73,15 +73,21 @@ Mapped:
 - **Damaged saves:** kept aside instead of lost.
 
 **4. Recoverable changes: still partial**
-- No schema migrations: `version` is still 1, and old projects rely on `?? []` guards.
+- Old, partial and imported projects now pass through `normalizeProject` (`lib/migrate.ts`), and files from a newer app version are refused with a clear message. **Done**, 3 tests.
 - There is no conflict handling for cloud saves.
 - The generator plan still uses its own stated diversity factors. They are labelled there, but not yet shown alongside the shared totals.
 
-## Priority 2: accessibility and usability. Not started
+## Priority 2: accessibility and usability. Done for the items below
 
-- Shared accessible dialog (focus trap, inert background, Escape, return focus).
-- Contrast of the 10 px grey text.
-- Help cards moved out of the canvas.
+- **Shared accessible dialog** (`useDialog` in `components/ui.tsx`), used by every Modal and the venue library. Verified in the browser on the feedback form:
+  - Focus moves to the first field.
+  - Tab and Shift+Tab wrap inside the dialog.
+  - The page behind is inert.
+  - Escape closes it and focus returns to the trigger.
+- **Text contrast:** muted text is `#858585` on dark and `#666666` on light, 4.5:1 or better on the panels (it was 3.94:1). Canvas labels are updated to match.
+- **Reduced motion:** honoured by CSS animations, and the 3D view starts without auto-orbit or moving lights when the system asks for reduced motion.
+- **Tips:** they fold into a small "How this works" tab after "Got it". The choice is remembered and the tips can be reopened.
+- **Not done:** a full audit of names on icon-only buttons, and touch-target sizes.
 
 ## Priority 3: editor organisation and precise editing. Partial (from earlier work)
 
@@ -116,7 +122,25 @@ Mapped:
   - Paths and sweeps.
   - Converting set pieces into parts.
 
-## Priorities 5 to 10. Not started
+## Priority 7: revisions. Partial
+
+- **Save points** (File → Save points…): named versions with notes, stored per project on this device. Verified in the browser and covered by 2 tests.
+  - Restoring first saves the current state as a point, and the restore can be undone.
+- **Duplicate:** now "Duplicate as a new option", which makes a separate project named "(option B)".
+- **Not done:** approval locking, and showing the revision in client links.
+
+## Priority 8: quotations. Partial
+
+- **Markup:** "Markup on rates" shows its gross-margin equivalent.
+- **Unpriced rows:** shown as Unpriced, counted, and left out of the total.
+- **Calculation order** is stated in the app and on the PDF.
+- **Quote details:** number, revision, valid-until date, and draft/sent/approved status, all in the app and on the PDF.
+- **Input limits:** discount 0–100% and no negative extras. 1 test.
+- **Not done:** checking every export format's file structure.
+
+## Priorities 5, 6, 9 and 10. Not started
+
+Judged lower value for now, or blocked: MVR/GDTF export, a full editor restructure, path sweeps, and a performance test suite.
 
 Assets, materials and branding; event-specific intelligence; presentation and revisions; quotations and export validation; onboarding and newsletter; responsiveness and performance.
 
