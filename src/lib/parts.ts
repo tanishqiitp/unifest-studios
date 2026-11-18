@@ -155,7 +155,7 @@ export const copies = (p: Part) => Math.max(1, Math.min(p.array?.mode === 'surfa
 
 // Rough surface area for the quote (box around the part, all copies).
 export function partArea(p: Part) {
-  if (p.kind === 'group') return 0
+  if (p.kind === 'group' || p.cutter) return 0
   const [sx, sy, sz] = p.scl.map(Math.abs)
   const w = p.w * sx
   const d = p.d * sy

@@ -6,6 +6,7 @@ import { BRUSHES, SculptSession, useSculpt } from './Sculpt'
 import { useGlCreated } from '../components/Safe3D'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
 import { GizmoHelper, GizmoViewport, Grid, OrbitControls, PerformanceMonitor, TransformControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { create } from 'zustand'
@@ -13,7 +14,12 @@ import {
   Box as BoxIcon,
   ChevronDown,
   ChevronRight,
+  ClipboardCopy,
+  ClipboardPaste,
   Copy,
+  MapPin,
+  Ruler,
+  Scissors,
   Crosshair,
   ArrowDownToLine,
   Download,
@@ -75,6 +81,9 @@ interface ModelUI {
   dupOf: string[] // the copies made by the last duplicate
   dupBase: { pos: Vec3; rot: Vec3 } | null // where the copied part was, to learn the repeat step
   rep: { d: Vec3; r: Vec3 } | null // Ctrl+D: the move and turn to repeat on the next copy
+  tool: 'ruler' | 'place' | null // click tools in the 3D view
+  ruler: [number, number, number][] // measured points, three.js coordinates
+  clip: { pos: Vec3; rot: Vec3; scl: Vec3 } | null // copied placement (position on stage)
   objs: Record<string, THREE.Object3D>
   set: (p: Partial<ModelUI>) => void
 }
@@ -94,6 +103,9 @@ export const useModel = create<ModelUI>((set) => ({
   dupOf: [],
   dupBase: null,
   rep: null,
+  tool: null,
+  ruler: [],
+  clip: null,
   objs: {},
   set: (p) => set(p),
 }))
@@ -286,8 +298,9 @@ export function ModelWorkspace() {
       <div className="relative flex-1 min-w-0 bg-canvas">
         <Viewport root={root} />
         <Toolbar root={root} />
+        <ToolHint />
         <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden lg:block">
-          G move · R rotate · S scale · X/Y/Z lock axis · Shift+D duplicate · Ctrl+D repeat · End drop · / isolate · Shift+G similar · Ctrl+G group · H hide · F frame · Alt free move
+          G move · R rotate · S scale · X/Y/Z lock axis · Shift+D duplicate · Ctrl+D repeat · End drop · / isolate · Shift+G similar · Ctrl+G group · H hide · F frame · Shift+R ruler · P place on face · Alt free move
         </div>
       </div>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">{active ? <Props p={active} /> : <Overview />}</aside>
@@ -489,6 +502,9 @@ function useShortcuts() {
       if (e.shiftKey && k === 'g') return (take(), selectSimilar())
       if (mod) return
       if (k === 'end') return (take(), dropSel())
+      if (e.shiftKey && k === 'r') return (take(), m.set({ tool: m.tool === 'ruler' ? null : 'ruler', ruler: [] }))
+      if (k === 'p') return (take(), m.sel.length ? m.set({ tool: m.tool === 'place' ? null : 'place' }) : undefined)
+      if (k === 'escape' && m.tool) return (take(), m.set({ tool: null, ruler: [] }))
       if (k === '/' || e.code === 'NumpadDivide') return (take(), toggleIsolate())
       if (k === 'g') return (take(), m.set({ mode: 'translate', axis: null }))
       if (k === 'r') return (take(), m.set({ mode: 'rotate', axis: null }))
@@ -556,7 +572,7 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
     const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js')
     const copy = r.clone(true)
     const drop: THREE.Object3D[] = []
-    copy.traverse((o) => (o as THREE.LineSegments).isLineSegments && drop.push(o))
+    copy.traverse((o) => ((o as THREE.LineSegments).isLineSegments || o.userData?.helper) && drop.push(o))
     drop.forEach((o) => o.removeFromParent())
     new GLTFExporter().parse(
       copy,
@@ -639,6 +655,12 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
       <div className={`${bar} pointer-events-auto`}>
         <button className={b(!!m.isolate)} title="Show only the selected parts (/)" aria-pressed={!!m.isolate} disabled={!m.isolate && !m.sel.length} onClick={toggleIsolate}>
           <ScanEye size={13} />
+        </button>
+        <button className={b(m.tool === 'ruler')} title="Ruler: click two points to measure; corners and edges snap, hold Alt for anywhere (Shift+R)" aria-pressed={m.tool === 'ruler'} onClick={() => m.set({ tool: m.tool === 'ruler' ? null : 'ruler', ruler: [] })}>
+          <Ruler size={13} />
+        </button>
+        <button className={b(m.tool === 'place')} title="Place on a face: click any surface to put the selected part on it, turned to match (P)" aria-pressed={m.tool === 'place'} disabled={!m.sel.length} onClick={() => m.set({ tool: m.tool === 'place' ? null : 'place' })}>
+          <MapPin size={13} />
         </button>
         <button className={b(m.context)} title="Show the stage, truss, screens, set and decor around your parts" onClick={() => m.set({ context: !m.context })}>
           Stage & set
@@ -852,6 +874,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
     if (o && objs[id] !== o) useModel.getState().set({ objs: { ...objs, [id]: o } })
   }, [])
   const pick = useCallback((id: string, e: ThreeEvent<MouseEvent>) => {
+    if (useModel.getState().tool) return
     const ps = parts()
     const target = e.detail >= 2 ? id : topOf(ps, id)
     const s = useModel.getState().sel
@@ -865,7 +888,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
       shadows={shadows}
       gl={{ antialias: q !== 'draft', preserveDrawingBuffer: false, powerPreference: 'high-performance' }}
       camera={{ position: [L.cx + 18, 14, L.front + 22], fov: 40, near: 0.05, far: 3000 }}
-      onPointerMissed={(e) => e.button === 0 && !e.shiftKey && useModel.getState().set({ sel: [] })}
+      onPointerMissed={(e) => e.button === 0 && !e.shiftKey && !useModel.getState().tool && useModel.getState().set({ sel: [] })}
     >
       {q === 'auto' && <PerformanceMonitor onDecline={() => setDpr((d) => Math.max(0.75, d - 0.25))} onIncline={() => setDpr((d) => Math.min(max, d + 0.25))} flipflops={4} />}
       <color attach="background" args={[light ? '#eeeeee' : '#0b0b0b']} />
@@ -891,6 +914,8 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
       </group>
       <Gizmo />
       <Guides />
+      <PointerTools />
+      <RulerMarks />
       <ViewBridge />
       {m.person && <ScaleFigure x={L.cx + Math.min(6, L.w / 2 + 1.5)} y={L.front + 1.5} z={0} />}
       <SculptSession part={all.find((p) => p.id === m.sel[m.sel.length - 1])} objs={m.objs} />
@@ -954,8 +979,9 @@ function Gizmo() {
   const start = useRef<Map<string, { p: THREE.Vector3; r: THREE.Euler; s: THREE.Vector3 }>>(new Map())
   const snap0 = useRef<{ w: THREE.Vector3; box: Box; others: Box[] } | null>(null)
   const sculpting = useSculpt((s) => s.on)
+  const clickTool = useModel((s) => s.tool)
   // No move handles while sculpting, or on scattered copies (they always sit on their parent's surface).
-  if (!part || !obj || part.locked || !obj.parent || (sculpting && part.kind === 'sculpt') || part.array?.mode === 'surface') return null
+  if (!part || !obj || part.locked || !obj.parent || clickTool || (sculpting && part.kind === 'sculpt') || part.array?.mode === 'surface') return null
   const snapshot = () => {
     start.current = new Map(sel.filter((id) => objs[id]).map((id) => [id, { p: objs[id].position.clone(), r: objs[id].rotation.clone(), s: objs[id].scale.clone() }]))
     const box = mode === 'translate' && useModel.getState().snapParts ? boxOf(active) : null
@@ -1050,6 +1076,7 @@ function Overview() {
   const area = all.reduce((a, p) => a + partArea(p), 0)
   return (
     <Section title="3D model">
+      <FloatingCheck />
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Parts" value={all.filter((p) => p.kind !== 'group').length} />
         <Stat label="Groups" value={all.filter((p) => p.kind === 'group').length} />
@@ -1104,6 +1131,16 @@ function Props({ p }: { p: Part }) {
           <input className="field mt-1" value={p.name} onChange={(e) => up({ name: e.target.value })} />
         </label>
         {!isGroup && <p className="text-[11px] text-mute">{PART_KINDS[p.kind as Exclude<PartKind, 'group'>].tip}</p>}
+        {!isGroup && (
+          <Check
+            label="Hole: cut it out of the other parts in its group"
+            checked={!!p.cutter}
+            onChange={(v) => {
+              up({ cutter: v || undefined })
+              if (v && !p.parent) notify('Now group it with the parts to cut (select them all, Ctrl+G)')
+            }}
+          />
+        )}
         {p.parent && (
           <button className="btn w-full justify-center text-[11px]" onClick={() => useModel.getState().set({ sel: [p.parent!] })}>
             Select the group it belongs to
@@ -1117,6 +1154,7 @@ function Props({ p }: { p: Part }) {
         <Vec label="Location" unit="m" v={p.pos} step={0.25} onChange={(i, n) => v3('pos', i, n)} />
         <Vec label="Rotation" unit="°" v={p.rot} step={15} onChange={(i, n) => v3('rot', i, n)} />
         <Vec label="Scale" unit="×" v={p.scl} step={0.1} onChange={(i, n) => v3('scl', i, n)} />
+        <ClipRow />
         <div className="grid grid-cols-3 gap-1">
           <button className="btn justify-center px-1 text-[11px]" title="Sit the part on the floor" onClick={() => v3('pos', 2, 0)}>
             To floor
@@ -1729,11 +1767,11 @@ function ArrangePanel() {
     <Section title="Arrange">
       {m.a && (
         <p className="text-[11px] text-mute">
-          Size on stage: <span className="text-ink tabular-nums">{sizeOf(m.a).map(m2).join(' × ')} m</span>
+          Size on stage: <span className="text-fg tabular-nums">{sizeOf(m.a).map(m2).join(' × ')} m</span>
           {g && (
             <>
               <br />
-              Gap to {prev?.name ?? 'the other part'}: <span className="text-ink tabular-nums">{g.gap.map((v, i) => `${['across', 'depth', 'up'][i]} ${v < -0.005 ? `overlaps ${m2(-v)}` : m2(Math.max(0, v))}`).join(' · ')} m</span>
+              Gap to {prev?.name ?? 'the other part'}: <span className="text-fg tabular-nums">{g.gap.map((v, i) => `${['across', 'depth', 'up'][i]} ${v < -0.005 ? `overlaps ${m2(-v)}` : m2(Math.max(0, v))}`).join(' · ')} m</span>
             </>
           )}
         </p>
@@ -1794,7 +1832,271 @@ function ArrangePanel() {
         <button className={btn} title="Select every part of the same kind and colour (Shift+G)" onClick={selectSimilar}>
           Select similar
         </button>
+        <button className={`${btn} col-span-2`} disabled={!many} title="Cut the last part you picked out of the others (it becomes a hole, and they are grouped)" onClick={cutSel}>
+          <Scissors size={12} /> Cut out the last picked
+        </button>
       </div>
     </Section>
+  )
+}
+
+// ---------------------------------------------------------------- click tools: ruler and place on a face
+
+const ray = new THREE.Raycaster()
+/** What the pointer is over: the first visible part or set surface (not helpers), else the floor. */
+function pointAt(e: PointerEvent, el: HTMLElement, camera: THREE.Camera, scene: THREE.Scene, skip?: THREE.Object3D) {
+  const r = el.getBoundingClientRect()
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera)
+  const usable = (o: THREE.Object3D | null) => {
+    for (let x = o; x; x = x.parent) {
+      if (!x.visible || x.userData?.helper || (x as unknown as { isTransformControls?: boolean }).isTransformControls || x === skip) return false
+    }
+    return true
+  }
+  for (const h of ray.intersectObjects(scene.children, true)) {
+    if (!(h.object as THREE.Mesh).isMesh || !usable(h.object)) continue
+    const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new THREE.Vector3(0, 1, 0)
+    if (n.dot(ray.ray.direction) > 0) n.negate()
+    return { point: h.point, normal: n, object: h.object }
+  }
+  const p = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3())
+  return p ? { point: p, normal: new THREE.Vector3(0, 1, 0), object: null } : null
+}
+
+/** Corners, edge middles and face centres of the thing under the pointer pull the ruler point onto them. */
+function snapPoint(p: THREE.Vector3, o: THREE.Object3D | null, reach: number) {
+  if (!o) return p
+  const b = new THREE.Box3().setFromObject(o)
+  if (b.isEmpty()) return p
+  const xs = [b.min.x, (b.min.x + b.max.x) / 2, b.max.x]
+  const ys = [b.min.y, (b.min.y + b.max.y) / 2, b.max.y]
+  const zs = [b.min.z, (b.min.z + b.max.z) / 2, b.max.z]
+  let best = p
+  let d = reach
+  for (const x of xs) for (const y of ys) for (const z of zs) {
+    const q = new THREE.Vector3(x, y, z)
+    const k = q.distanceTo(p)
+    if (k < d) (d = k), (best = q)
+  }
+  return best
+}
+
+function PointerTools() {
+  const tool = useModel((s) => s.tool)
+  const { gl, camera, scene } = useThree()
+  useEffect(() => {
+    if (!tool) return
+    const el = gl.domElement
+    el.style.cursor = 'crosshair'
+    let down: { x: number; y: number } | null = null
+    const onDown = (e: PointerEvent) => void (e.button === 0 && (down = { x: e.clientX, y: e.clientY }))
+    const onUp = (e: PointerEvent) => {
+      if (!down || e.button !== 0) return
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5 // a drag orbits the view instead
+      down = null
+      if (moved) return
+      const m = useModel.getState()
+      if (m.tool === 'ruler') {
+        const hit = pointAt(e, el, camera, scene)
+        if (!hit) return
+        const p = e.altKey ? hit.point : snapPoint(hit.point, hit.object, camera.position.distanceTo(hit.point) * 0.025)
+        const pt = p.toArray() as [number, number, number]
+        m.set({ ruler: m.ruler.length >= 2 ? [pt] : [...m.ruler, pt] })
+      } else if (m.tool === 'place') placeOnFace(e, el, camera, scene)
+    }
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointerup', onUp)
+    return () => {
+      el.style.cursor = ''
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointerup', onUp)
+    }
+  }, [tool, gl, camera, scene])
+  return null
+}
+
+/** Put the selected part on the clicked surface, standing out from it (its bottom on the face). */
+function placeOnFace(e: PointerEvent, el: HTMLElement, camera: THREE.Camera, scene: THREE.Scene) {
+  const m = useModel.getState()
+  const id = m.sel.at(-1)
+  const part = parts().find((p) => p.id === id)
+  const o = id ? m.objs[id] : undefined
+  if (!part || !o?.parent || part.locked) return m.set({ tool: null })
+  const hit = pointAt(e, el, camera, scene, o)
+  if (!hit) return
+  // How far the part's origin sits above its own bottom while upright, kept along the new 'up'.
+  o.updateWorldMatrix(true, true)
+  const box = new THREE.Box3().setFromObject(o)
+  const lift = o.getWorldPosition(new THREE.Vector3()).y - box.min.y
+  const turn = !e.altKey && hit.normal.y < 0.999
+  const q = turn ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), hit.normal) : o.getWorldQuaternion(new THREE.Quaternion())
+  const world = hit.point.clone().addScaledVector(turn ? hit.normal : new THREE.Vector3(0, 1, 0), lift)
+  o.parent.updateWorldMatrix(true, false)
+  const local = o.parent.worldToLocal(world)
+  const pq = o.parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(q)
+  const r2 = (n: number, k = 1000) => Math.round(n * k) / k
+  editParts((ps) =>
+    ps.map((p) =>
+      p.id === part.id
+        ? { ...p, pos: fromThree(local).map((n) => r2(n)) as Vec3, rot: turn ? (rotFromThree(new THREE.Euler().setFromQuaternion(pq, o.rotation.order)).map((n) => r2(n, 10)) as Vec3) : p.rot }
+        : p,
+    ),
+  )
+  m.set({ tool: null })
+  notify(`Placed ${part.name} on the surface${turn ? ', turned to match' : ''}`)
+}
+
+function RulerMarks() {
+  const pts = useModel((s) => s.ruler)
+  const tool = useModel((s) => s.tool)
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts.length === 2 ? pts.flat() : [], 3))
+    return g
+  }, [pts])
+  useEffect(() => () => geo.dispose(), [geo])
+  if (tool !== 'ruler' || !pts.length) return null
+  const [a, b] = pts
+  const d = b ? [b[0] - a[0], b[2] - a[2], b[1] - a[1]] : null
+  return (
+    <group userData={{ helper: true }}>
+      {pts.map((p, i) => (
+        <mesh key={i} position={p} renderOrder={999}>
+          <sphereGeometry args={[0.06, 12, 8]} />
+          <meshBasicMaterial color="#ffd400" depthTest={false} transparent />
+        </mesh>
+      ))}
+      {b && (
+        <>
+          <lineSegments geometry={geo} renderOrder={999}>
+            <lineBasicMaterial color="#ffd400" depthTest={false} transparent />
+          </lineSegments>
+          <Html position={[(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]} center style={{ pointerEvents: 'none' }}>
+            <div className="glass rounded-lg px-2 py-1 text-[11px] whitespace-nowrap tabular-nums">
+              <b>{fmt(Math.hypot(...d!), 2)} m</b>
+              <span className="text-mute"> · across {fmt(Math.abs(d![0]), 2)} · depth {fmt(Math.abs(d![1]), 2)} · up {fmt(Math.abs(d![2]), 2)}</span>
+            </div>
+          </Html>
+        </>
+      )}
+    </group>
+  )
+}
+
+function ToolHint() {
+  const tool = useModel((s) => s.tool)
+  const n = useModel((s) => s.ruler.length)
+  if (!tool) return null
+  const text =
+    tool === 'ruler'
+      ? n === 1
+        ? 'Click the second point. Corners and edges snap; hold Alt for anywhere.'
+        : 'Ruler: click two points to measure. Corners and edges snap; hold Alt for anywhere.'
+      : 'Click any surface to put the selected part on it, turned to match. Hold Alt to keep it upright.'
+  return (
+    <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-10 glass rounded-xl px-3 py-1.5 text-[11px] flex items-center gap-2 max-w-[90%]">
+      <span>{text}</span>
+      <button className="btn h-6 px-2 text-[11px]" onClick={() => useModel.getState().set({ tool: null, ruler: [] })}>
+        Done (Esc)
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- more helpers
+
+/** Make the last picked part a hole in the others: grouped together if they aren't already. */
+function cutSel() {
+  const { sel, set } = useModel.getState()
+  const ps = parts()
+  const id = sel.at(-1)
+  const tool = ps.find((p) => p.id === id)
+  if (!tool || sel.length < 2 || tool.kind === 'group') return notify('Select the parts to cut, then the shape to cut with last')
+  const same = sel.every((s) => ps.find((p) => p.id === s)?.parent === tool.parent) && !!tool.parent
+  if (same) editParts((xs) => xs.map((p) => (p.id === id ? { ...p, cutter: true } : p)))
+  else {
+    const r = groupParts(ps, sel)
+    editParts(() => r.parts.map((p) => (p.id === id ? { ...p, cutter: true } : p)))
+    if (r.group) set({ sel: [r.group.id] })
+  }
+  notify(`${tool.name} is now a hole in the others. Untick "Hole" on it to undo, or move it to change the cut.`)
+}
+
+/** Copy a part's place, turn and size, and paste any of them onto other parts. */
+function ClipRow() {
+  const clip = useModel((s) => s.clip)
+  const copy = () => {
+    const { sel, objs, set } = useModel.getState()
+    const p = parts().find((x) => x.id === sel.at(-1))
+    const o = p && objs[p.id]
+    if (!p || !o) return
+    set({ clip: { pos: fromThree(o.getWorldPosition(new THREE.Vector3())), rot: [...p.rot] as Vec3, scl: [...p.scl] as Vec3 } })
+    notify('Copied its place, turn and size')
+  }
+  const paste = (what: 'pos' | 'rot' | 'scl') => {
+    const c = useModel.getState().clip
+    if (!c) return
+    if (what === 'pos') {
+      const items = movable()
+      const objs = useModel.getState().objs
+      moveParts(new Map(items.map((x) => {
+        const w = fromThree(objs[x.id].getWorldPosition(new THREE.Vector3()))
+        return [x.id, [c.pos[0] - w[0], c.pos[1] - w[1], c.pos[2] - w[2]] as Vec3]
+      })))
+    } else {
+      const ids = new Set(movable().map((x) => x.id))
+      editParts((ps) => ps.map((p) => (ids.has(p.id) ? { ...p, [what]: [...c[what]] as Vec3 } : p)))
+    }
+  }
+  const btn = 'btn justify-center px-1 text-[11px] disabled:opacity-30'
+  return (
+    <div className="grid grid-cols-4 gap-1">
+      <button className={btn} title="Copy this part's place on stage, turn and size" onClick={copy}>
+        <ClipboardCopy size={12} />
+      </button>
+      {(['pos', 'rot', 'scl'] as const).map((k) => (
+        <button key={k} className={btn} disabled={!clip} title={`Paste the copied ${{ pos: 'place on stage', rot: 'turn', scl: 'scale' }[k]} onto the selected parts`} onClick={() => paste(k)}>
+          <ClipboardPaste size={12} /> {{ pos: 'Place', rot: 'Turn', scl: 'Size' }[k]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Parts hanging in the air with nothing under them: often a slip, one click to settle them. */
+function FloatingCheck() {
+  const all = useStore((s) => s.project.parts ?? NO_PARTS)
+  const objs = useModel((s) => s.objs)
+  const [ids, setIds] = useState<string[]>([])
+  useEffect(() => {
+    const r = requestAnimationFrame(() => {
+      const roots = childrenOf(all, undefined).filter((p) => !p.hidden && !p.cutter)
+      const boxes = roots.map((p) => ({ id: p.id, box: boxOf(p.id) })).filter((x): x is { id: string; box: Box } => !!x.box)
+      setIds(boxes.filter((x) => x.box.min[2] > 0.02 && dropMove(x.box, boxes.filter((y) => y !== x).map((y) => y.box))[2] < -0.02).map((x) => x.id))
+    })
+    return () => cancelAnimationFrame(r)
+  }, [all, objs])
+  if (!ids.length) return null
+  return (
+    <div className="rounded-lg border border-line p-2 text-[11px] space-y-1.5">
+      <p>
+        <b>{ids.length}</b> {ids.length === 1 ? 'part is' : 'parts are'} in the air with nothing under {ids.length === 1 ? 'it' : 'them'}. Fine for hanging pieces; otherwise settle them.
+      </p>
+      <div className="grid grid-cols-2 gap-1">
+        <button className="btn justify-center text-[11px]" onClick={() => useModel.getState().set({ sel: ids })}>
+          Select them
+        </button>
+        <button
+          className="btn justify-center text-[11px]"
+          onClick={() => {
+            useModel.getState().set({ sel: ids })
+            dropSel()
+            useModel.getState().set({ sel: [] })
+          }}
+        >
+          <ArrowDownToLine size={12} /> Drop them
+        </button>
+      </div>
+    </div>
   )
 }

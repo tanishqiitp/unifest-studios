@@ -396,6 +396,7 @@ export interface Part {
   twist?: number // degrees turned from bottom to top
   bend?: number // degrees the width curls into an arc (180 = a standing arch)
   organic?: number // 0..1: smooth sculpted bumps over the surface
+  cutter?: boolean // a hole: cut out of the other parts in the same group, not drawn itself
   seed?: number // changes the organic pattern
   base?: 'sphere' | 'panel' | 'block' // sculpt: starting shape
   res?: 'low' | 'medium' | 'high' // sculpt: point density

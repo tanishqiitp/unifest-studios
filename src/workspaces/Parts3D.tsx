@@ -7,6 +7,7 @@ import { alongCurve, curveGeometry } from '../lib/curves'
 import { cutoutPaths } from '../lib/cutouts'
 import { decodeSculpt, sculptBase } from '../lib/sculpt'
 import { instances } from '../lib/partArrays'
+import { csgReady, cutGeometry, requestCsg, subscribeCsg } from '../lib/csg'
 import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
@@ -392,7 +393,23 @@ function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean
   const gk = geoKey(p)
   const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [gk, p.sculpt, fontReady]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => geo?.dispose(), [geo])
-  const mat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
+  // Holes: cutters in the same group are taken out of this part (worked out once per edit).
+  const cutters = !p.cutter && p.parent && p.kind !== 'group' && p.array?.mode !== 'surface' ? ctx.all.filter((h) => h.cutter && h.parent === p.parent && h.id !== p.id && !h.hidden && h.kind !== 'group') : NO_CUTTERS
+  const ck = cutters.length ? JSON.stringify([p.pos, p.rot, p.scl, cutters.map((h) => [geoKey(h), h.pos, h.rot, h.scl])]) : ''
+  const csg = useSyncExternalStore(subscribeCsg, csgReady)
+  useEffect(() => void (ck && requestCsg()), [ck])
+  const cut = useMemo(() => {
+    if (!ck || !geo || !csg) return null
+    const inv = partMatrix(p).invert()
+    const list = cutters.map((h) => ({ geo: partGeometry(h), matrix: inv.clone().multiply(partMatrix(h)) })).filter((x): x is { geo: THREE.BufferGeometry; matrix: THREE.Matrix4 } => !!x.geo)
+    const out = cutGeometry(geo, list)
+    list.forEach((x) => x.geo.dispose())
+    return out
+  }, [geo, ck, csg]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => cut?.dispose(), [cut])
+  const shape = cut ?? geo
+  const partMat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
+  const mat = p.cutter ? CUTTER_MAT : partMat
   // Alternating copies share one second material in the alternate colour.
   const altColor = p.array?.alt
   const altMat = useMemo(() => {
@@ -408,6 +425,8 @@ function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean
   const sk = surface && p.array ? `${geoKey(surface)}|${surface.sculpt?.length ?? 0}|${JSON.stringify([p.pos, p.rot, p.scl, p.array, p.seed])}` : ''
   const scatter = useMemo(() => (surface && p.array ? scatterMatrices(surface, p) : null), [sk]) // eslint-disable-line react-hooks/exhaustive-deps
   if (p.hidden) return null
+  // Cutters show (as a red ghost) only while editing; the client view, renders and exports never see them.
+  if (p.cutter && !ctx.register) return null
   if (scatter && geo)
     return (
       <group ref={mirrored || !ctx.register || copy > 0 ? undefined : (o) => ctx.register!(p.id, o)} position={toThree(p.pos)} rotation={rotToThree(p.rot)} scale={toThree(p.scl)} userData={{ partId: p.id, root }}>
@@ -427,9 +446,10 @@ function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean
       {copiesOf(p, ctx.all).map((ins, i) => (
         <group key={i} position={ins.pos} rotation={[0, ins.rotY, ins.rotZ ?? 0]} scale={[ins.flip ? -1 : 1, ins.sy, 1]}>
           <group position={[0, 0, radius]}>
-            {geo && (
+            {shape && (
               <mesh
-                geometry={geo}
+                geometry={shape}
+                userData={p.cutter ? { helper: true } : undefined}
                 material={ins.alt && altMat ? altMat : mat}
                 castShadow={ctx.shadows}
                 receiveShadow={ctx.shadows}
@@ -443,7 +463,7 @@ function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean
                 }
               />
             )}
-            {sel && geo && i === 0 && <SelOutline geo={geo} />}
+            {sel && shape && i === 0 && <SelOutline geo={shape} />}
             {kids.map((k) => (
               <PartNode key={k.id} p={k} mirrored={mirrored} copy={Math.max(copy, i)} />
             ))}
@@ -501,6 +521,13 @@ function Scattered({ geo, mat, data, shadows, onPick }: { geo: THREE.BufferGeome
 }
 
 const outlineMat = new THREE.LineBasicMaterial({ color: '#ff9a1f', depthTest: false, transparent: true, opacity: 0.9 })
+const NO_CUTTERS: Part[] = []
+const CUTTER_MAT = new THREE.MeshStandardMaterial({ color: '#ff4d6d', transparent: true, opacity: 0.28, depthWrite: false, roughness: 1 })
+/** A part's placement inside its group, as a matrix. */
+function partMatrix(q: Part) {
+  return new THREE.Matrix4().compose(new THREE.Vector3(...toThree(q.pos)), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotToThree(q.rot))), new THREE.Vector3(...toThree(q.scl)))
+}
+
 function SelOutline({ geo }: { geo: THREE.BufferGeometry }) {
   // Dense meshes (sculpts, organic shapes) get a bounding box instead of every hard edge.
   const edges = useMemo(() => {
