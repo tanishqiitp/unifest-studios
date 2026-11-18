@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { retryImport, Safe3D } from '../components/Safe3D'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { real } from '../lib/theme'
 import { Arc, Arrow, Circle, Ellipse, Group, Image as KImage, Line, Rect, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
@@ -12,7 +13,8 @@ import { applyTheme, buildKit, hasOpening, KITS, newPiece, SET_KINDS, setLedArea
 import { readImage } from './Decor'
 import { Check, Num, Section, Sel, Stat, Txt } from '../components/ui'
 import { fmt } from '../lib/calc'
-import { SetCad3D } from './SetCad3D'
+// The 3D pane (three.js) loads only when a 3D view is opened, keeping the first page load light.
+const SetCad3D = lazy(() => retryImport(() => import('./SetCad3D')).then((m) => ({ default: m.SetCad3D })))
 import { AlignBar, SnapGuides, useGuides } from '../components/Align'
 import { snapRect } from '../lib/snap'
 
@@ -31,6 +33,9 @@ export const SKIN_FILL: Record<Skin, string> = {
 const fillOf = (s: Skin, color: string) => real(s === 'paint' || s === 'fabric' || s === 'print' ? color : SKIN_FILL[s])
 
 // CAD-style set designer: front, top and side views plus 3D. Konva's y runs down, so front and side views use y = -height.
+// Stable empty list: a fresh [] in a store selector would re-render forever.
+const NO_SET: SetPiece[] = []
+
 export function SetDesignWorkspace() {
   const project = useStore((s) => s.project)
   const sel = useStore((s) => s.ui.selection)
@@ -220,7 +225,13 @@ function SetViews() {
   const draw = layout !== '3d'
   const active = TOOLS.find((t) => t.id === tool)!
   const pane = (v: Layout, compact: boolean) =>
-    v === '3d' ? <SetCad3D compact={compact} onExit={() => setLayout('front')} /> : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
+    v === '3d' ? (
+      <Safe3D onExit={() => setLayout('front')} exitLabel="Use 2D views">
+        <Suspense fallback={<div className="absolute inset-0 flex items-center justify-center text-xs text-mute">Loading 3D…</div>}>
+          <SetCad3D compact={compact} onExit={() => setLayout('front')} />
+        </Suspense>
+      </Safe3D>
+    ) : <ViewPane view={v as CadView} tool={tool} done={() => setTool('select')} compact={compact} />
   return (
     <div className="relative flex-1 min-w-0 bg-canvas">
       {layout === 'quad' ? (
@@ -359,7 +370,7 @@ function ViewPane({ view, tool, done, compact }: { view: CadView; tool: Tool; do
       }}
       overlay={
         <>
-          <div className={`absolute ${compact ? 'top-2 right-2' : 'top-4 right-4'} glass rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-widest text-dim pointer-events-none`}>
+          <div className={`absolute ${compact ? 'top-2 right-2' : 'top-[68px] right-4'} glass rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-widest text-dim pointer-events-none`}>
             {VIEW_NAME[view]} <span className="text-mute normal-case tracking-normal">· {VIEW_AXES[view][0]} · {VIEW_AXES[view][1]}</span>
           </div>
           {multi && pts.length >= 2 && (
@@ -527,7 +538,7 @@ function useImg(src?: string) {
 function PieceNode({ s, view, listening }: { s: SetPiece; view: CadView; listening: boolean }) {
   const v = useView()
   const sel = useStore((st) => st.ui.selection)
-  const set = useStore((st) => st.project.set ?? [])
+  const set = useStore((st) => st.project.set ?? NO_SET)
   const deckH = useStore((st) => setLine(st.project).deckH)
   const lineY = useStore((st) => setLine(st.project).y)
   const { mutate, select } = useStore.getState()
@@ -741,7 +752,7 @@ function Bulbs({ s }: { s: SetPiece }) {
 function PieceProps({ s }: { s: SetPiece }) {
   const { mutate, select, notify } = useStore.getState()
   const file = useRef<HTMLInputElement>(null)
-  const set = useStore((st) => st.project.set ?? [])
+  const set = useStore((st) => st.project.set ?? NO_SET)
   const twin = set.find((x) => x.mirrorOf === s.id)
   const src = s.mirrorOf ? set.find((x) => x.id === s.mirrorOf) : undefined
   const up = (patch: Partial<SetPiece>) => mutate((p) => Object.assign(p.set!.find((x) => x.id === s.id)!, patch))

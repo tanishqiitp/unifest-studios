@@ -158,3 +158,11 @@ export function AppCrash({ onHome }: { onHome?: () => void }) {
     </div>
   )
 }
+
+/**
+ * Load a code chunk, retrying twice on a flaky connection (or right after a new deploy) before giving up.
+ * React caches a failed lazy load, so retrying here is what lets "Try again" work.
+ */
+export function retryImport<T>(load: () => Promise<T>, tries = 3): Promise<T> {
+  return load().catch((err) => (tries <= 1 ? Promise.reject(err) : new Promise<T>((res) => setTimeout(() => res(retryImport(load, tries - 1)), 1200))))
+}

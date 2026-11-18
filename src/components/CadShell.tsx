@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { retryImport, Safe3D } from './Safe3D'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { real } from '../lib/theme'
 import { Arrow, Group, Line, Rect, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
@@ -6,7 +7,8 @@ import { Box, LayoutGrid } from 'lucide-react'
 import { useStore } from '../store'
 import { PlanCanvas, useView } from './PlanCanvas'
 import { applyBox, CAD_EDITS, cadItems, fromRect, toRect, type CadItem, type FlatView } from '../lib/cad'
-import { SetCad3D } from '../workspaces/SetCad3D'
+// The 3D pane (three.js) loads only when a 3D view is opened, keeping the first page load light.
+const SetCad3D = lazy(() => retryImport(() => import('../workspaces/SetCad3D')).then((m) => ({ default: m.SetCad3D })))
 import { AlignBar, SnapGuides, useGuides } from './Align'
 import { snapRect } from '../lib/snap'
 
@@ -40,7 +42,14 @@ export function CadShell({ ws, home, children, extraBar }: { ws: string; home: F
   const [layout, setLayout] = useCadLayout(ws, home)
   const pane = (v: CadLayout, compact: boolean) => {
     if (v === home) return children
-    if (v === '3d') return <SetCad3D compact={compact} edit={ws} onExit={() => setLayout(home)} />
+    if (v === '3d')
+      return (
+        <Safe3D onExit={() => setLayout(home)} exitLabel="Use 2D views">
+          <Suspense fallback={<div className="absolute inset-0 flex items-center justify-center text-xs text-mute">Loading 3D…</div>}>
+            <SetCad3D compact={compact} edit={ws} onExit={() => setLayout(home)} />
+          </Suspense>
+        </Safe3D>
+      )
     return <FlatPane view={v as FlatView} ws={ws} compact={compact} />
   }
   return (
@@ -88,7 +97,7 @@ export function ViewBar({ layout, setLayout, extra, quad }: { layout: CadLayout;
 
 function PaneLabel({ view, compact }: { view: FlatView; compact: boolean }) {
   return (
-    <div className={`absolute ${compact ? 'top-2 right-2' : 'top-4 right-4'} glass rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-widest text-dim pointer-events-none z-10`}>
+    <div className={`absolute ${compact ? 'top-2 right-2' : 'top-[68px] right-4'} glass rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-widest text-dim pointer-events-none z-10`}>
       {NAME[view]} <span className="text-mute normal-case tracking-normal">· {AXES[view][0]} · {AXES[view][1]}</span>
     </div>
   )

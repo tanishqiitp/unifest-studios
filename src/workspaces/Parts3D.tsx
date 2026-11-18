@@ -1,4 +1,14 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { fontState, requestFont, subscribeFont, text3dGeometry } from '../lib/text3d'
+import { applyCage, hasCage } from '../lib/cage'
+import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js'
+import { drapeGeometry } from '../lib/drape'
+import { alongCurve, curveGeometry } from '../lib/curves'
+import { cutoutPaths } from '../lib/cutouts'
+import { decodeSculpt, sculptBase } from '../lib/sculpt'
+import { instances } from '../lib/partArrays'
+import { csgReady, cutGeometry, requestCsg, subscribeCsg } from '../lib/csg'
+import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
@@ -17,7 +27,142 @@ export type Shading = 'solid' | 'material' | 'wire' | 'xray'
 
 // ---------- geometry (origin at the bottom centre; x across, y up, z depth) ----------
 
+// Sculpting, applied on build so every value stays editable: an organic surface (smooth bumps pushed along the
+// surface normal), taper and twist along the height, and bend, which curls the width into an arc.
+const tween = (a: number, b: number, t: number) => a + (b - a) * t
+function weldedNormals(g: THREE.BufferGeometry): THREE.BufferAttribute {
+  const pos = g.getAttribute('position') as THREE.BufferAttribute
+  const plain = new THREE.BufferGeometry()
+  plain.setAttribute('position', pos.clone())
+  if (g.index) plain.setIndex(g.index.clone())
+  const welded = mergeVertices(plain, 1e-4)
+  welded.computeVertexNormals()
+  const wp = welded.getAttribute('position')
+  const wn = welded.getAttribute('normal')
+  const key = (x: number, y: number, z: number) => `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`
+  const byPos = new Map<string, number>()
+  for (let i = 0; i < wp.count; i++) byPos.set(key(wp.getX(i), wp.getY(i), wp.getZ(i)), i)
+  const out = new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3)
+  for (let i = 0; i < pos.count; i++) {
+    const j = byPos.get(key(pos.getX(i), pos.getY(i), pos.getZ(i)))
+    if (j !== undefined) out.setXYZ(i, wn.getX(j), wn.getY(j), wn.getZ(j))
+  }
+  plain.dispose()
+  welded.dispose()
+  return out
+}
+
+// Smooth repeatable 3D noise from layered sines: no dependency, same result for the same seed.
+function ripple(x: number, y: number, z: number, s: number) {
+  return (
+    Math.sin(1.7 * x + s) * Math.sin(1.3 * y + 2.1 * s) * Math.sin(1.9 * z + 0.7 * s) +
+    0.5 * Math.sin(3.1 * x - 1.3 * s) * Math.sin(2.7 * y + 0.4 * s) * Math.sin(3.3 * z + 1.9 * s) +
+    0.25 * Math.sin(6.3 * x + 0.9 * s) * Math.sin(5.9 * y - 1.7 * s) * Math.sin(6.7 * z + 2.3 * s)
+  )
+}
+
+// An outline (0..1) pushed into a solid, with any openings cut through it.
+function cutPanel(p: Part, outline: [number, number][], bev: number) {
+  const { w, h, d } = p
+  const to = ([u, v]: [number, number]) => new THREE.Vector2((u - 0.5) * w, v * h)
+  const shape = new THREE.Shape(outline.map(to))
+  if (p.holes) for (const hole of cutoutPaths(p.holes, outline, w / Math.max(0.01, h))) shape.holes.push(new THREE.Path(hole.map(to)))
+  const g = new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev, bevelSegments: 2, curveSegments: 12 })
+  g.translate(0, 0, -d / 2)
+  return g
+}
+
+function sculptGeometry(p: Part) {
+  const base = sculptBase(p.base ?? 'sphere', p.res ?? 'medium')
+  const g = base.clone()
+  // Share the base's index: it never changes, and the brush's neighbour tables are cached on it.
+  g.setIndex(base.getIndex())
+  const pos = g.getAttribute('position') as THREE.BufferAttribute
+  const saved = p.sculpt ? decodeSculpt(p.sculpt, [p.w, p.h, p.d], pos.count) : null
+  if (saved) pos.array.set(saved)
+  else g.scale(p.w, p.h, p.d)
+  pos.needsUpdate = true
+  g.computeVertexNormals()
+  g.computeBoundingSphere()
+  return g
+}
+
 export function partGeometry(p: Part): THREE.BufferGeometry | null {
+  // Sculpted shapes are edited point by point, so they skip the build-time modifiers.
+  if (p.kind === 'sculpt') return sculptGeometry(p)
+  if (p.kind === 'path') return curveGeometry(p)
+  if (p.kind === 'drape') return drapeGeometry(p)
+  const tapered = p.taper !== undefined && Math.abs(p.taper - 1) > 1e-3
+  const organic = (p.organic ?? 0) > 0
+  const bend = Math.abs(p.bend ?? 0) > 0.5
+  const caged = hasCage(p.cage)
+  const g = baseGeometry(p, { taper: tapered || !!p.twist || caged, organic, bend })
+  if (!g || !(tapered || p.twist || organic || bend || caged)) return g
+  const pos = g.getAttribute('position') as THREE.BufferAttribute
+  const box = new THREE.Box3().setFromBufferAttribute(pos)
+  const y0 = box.min.y
+  const span = Math.max(1e-6, box.max.y - y0)
+  if (organic) {
+    // Push along normals averaged over points at the same spot, so edges and seams (boxes, caps, extrudes)
+    // move together and the surface never tears open.
+    const nrm = weldedNormals(g)
+    const size = Math.max(0.05, Math.min(p.w, p.h, p.d))
+    const amp = (p.organic ?? 0) * size * 0.5
+    const f = 2.4 / Math.max(0.2, Math.max(p.w, p.h, p.d) * 0.35)
+    const seed = p.seed ?? 1
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const z = pos.getZ(i)
+      const n = ripple(x * f, y * f, z * f, seed) * amp
+      pos.setXYZ(i, x + nrm.getX(i) * n, y + nrm.getY(i) * n, z + nrm.getZ(i) * n)
+    }
+  }
+  if (tapered || p.twist) {
+    const taper = p.taper ?? 1
+    const tw = THREE.MathUtils.degToRad(p.twist ?? 0)
+    for (let i = 0; i < pos.count; i++) {
+      const t = (pos.getY(i) - y0) / span
+      const k = tween(1, taper, t)
+      const a = tw * t
+      const x = pos.getX(i) * k
+      const z = pos.getZ(i) * k
+      pos.setXYZ(i, x * Math.cos(a) - z * Math.sin(a), pos.getY(i), x * Math.sin(a) + z * Math.cos(a))
+    }
+  }
+  if (caged) {
+    // Cage handles bend the whole shape smoothly (front: across and up; side: depth and up).
+    applyCage(pos.array as Float32Array, [box.min.x, box.min.y, box.min.z], [box.max.x, box.max.y, box.max.z], [p.w, p.h, p.d], p.cage!)
+  }
+  if (bend) {
+    // Curl the width around a centre below the part: 180° turns a flat ribbon into a standing arch.
+    const total = THREE.MathUtils.degToRad(Math.max(-359, Math.min(359, p.bend ?? 0)))
+    const w = Math.max(1e-6, box.max.x - box.min.x)
+    const R = w / Math.abs(total)
+    const sign = Math.sign(total)
+    for (let i = 0; i < pos.count; i++) {
+      const th = ((pos.getX(i) - (box.min.x + box.max.x) / 2) / w) * total
+      const r = R + sign * (pos.getY(i) - y0)
+      pos.setXYZ(i, Math.sin(th) * r * sign, y0 + sign * (Math.cos(th) * r - R), pos.getZ(i))
+    }
+    // Stand the curled shape back on the ground.
+    const nb = new THREE.Box3().setFromBufferAttribute(pos)
+    g.translate(0, -nb.min.y, 0)
+  }
+  pos.needsUpdate = true
+  g.computeVertexNormals()
+  g.computeBoundingBox()
+  g.computeBoundingSphere()
+  return g
+}
+
+function baseGeometry(p: Part, need: { taper: boolean; organic: boolean; bend: boolean } = { taper: false, organic: false, bend: false }): THREE.BufferGeometry | null {
+  // Shapes that will be sculpted need enough points to bend smoothly.
+  const sx = need.bend ? 96 : need.organic ? 24 : need.taper ? 12 : 1
+  const sy = need.organic ? 24 : need.taper ? 16 : need.bend ? 2 : 1
+  const sz = need.organic ? 12 : need.taper ? 12 : 1
+  // Round shapes need rings up their height to taper, twist or bend smoothly.
+  const hs = need.taper || need.organic ? 24 : 1
   const { w, h, d } = p
   const seg = Math.max(3, Math.round(p.seg ?? 32))
   let g: THREE.BufferGeometry
@@ -25,16 +170,18 @@ export function partGeometry(p: Part): THREE.BufferGeometry | null {
     case 'group':
       return null
     case 'box':
-      g = p.bevel && p.bevel > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(p.bevel, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d)
+      // A box with openings is built as a cut panel: same size, depth = its depth.
+      if (p.holes) return cutPanel(p, [[0, 0], [1, 0], [1, 1], [0, 1]], 0)
+      g = p.bevel && p.bevel > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(p.bevel, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d, sx, sy, sz)
       g.translate(0, h / 2, 0)
       return g
     case 'cylinder':
-      g = new THREE.CylinderGeometry(w / 2, w / 2, h, seg)
+      g = new THREE.CylinderGeometry(w / 2, w / 2, h, seg, hs)
       g.scale(1, 1, d / Math.max(w, 0.001))
       g.translate(0, h / 2, 0)
       return g
     case 'cone':
-      g = new THREE.ConeGeometry(w / 2, h, seg)
+      g = new THREE.ConeGeometry(w / 2, h, seg, hs)
       g.scale(1, 1, d / Math.max(w, 0.001))
       g.translate(0, h / 2, 0)
       return g
@@ -59,10 +206,14 @@ export function partGeometry(p: Part): THREE.BufferGeometry | null {
       g.rotateX(-Math.PI / 2)
       g.translate(0, h, 0)
       return g
-    case 'text':
+    case 'text': {
+      // 3D letters once the font is here; a flat sign until then (or if it cannot load).
+      const solid = p.solid ? text3dGeometry(p.text || 'TEXT', w, h, Math.max(0.02, d), p.bevel ?? 0) : null
+      if (solid) return solid
       g = new THREE.PlaneGeometry(w, h)
       g.translate(0, h / 2, 0)
       return g
+    }
     case 'stairs': {
       const n = Math.max(1, Math.round(p.steps ?? 6))
       const rise = h / n
@@ -92,13 +243,15 @@ export function partGeometry(p: Part): THREE.BufferGeometry | null {
       return g
     }
     case 'extrude': {
-      const pts = (p.profile ?? []).map(([u, v]) => new THREE.Vector2((u - 0.5) * w, v * h))
-      if (pts.length < 3) return null
-      const bev = Math.max(0, p.bevel ?? 0)
-      g = new THREE.ExtrudeGeometry(new THREE.Shape(pts), { depth: d, bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev, bevelSegments: 2, curveSegments: 12 })
-      g.translate(0, 0, -d / 2)
-      return g
+      if ((p.profile ?? []).length < 3) return null
+      return cutPanel(p, p.profile!, Math.max(0, p.bevel ?? 0))
     }
+    case 'sculpt':
+      return sculptGeometry(p)
+    case 'path':
+      return curveGeometry(p)
+    case 'drape':
+      return drapeGeometry(p)
   }
 }
 
@@ -138,7 +291,9 @@ function useMap(src?: string) {
 function usePartMaterial(p: Part, shading: Shading, led: THREE.Texture | null, mirrored: boolean) {
   const m: PartMat = p.mat
   const map = useMap(m.map)
-  const text = useMemo(() => (p.kind === 'text' ? textTexture(p.text || ' ', p.w, p.h) : null), [p.kind, p.text, p.w, p.h])
+  const fontReady = useSyncExternalStore(subscribeFont, fontState) === 'ready'
+  const flatText = p.kind === 'text' && !(p.solid && fontReady)
+  const text = useMemo(() => (flatText ? textTexture(p.text || ' ', p.w, p.h) : null), [flatText, p.text, p.w, p.h])
   useEffect(() => () => text?.dispose(), [text])
   const mat = useMemo(() => {
     const solid = shading === 'solid'
@@ -156,12 +311,12 @@ function usePartMaterial(p: Part, shading: Shading, led: THREE.Texture | null, m
       opacity: shading === 'xray' ? 0.35 : (m.opacity ?? 1),
       alphaTest: text ? 0.4 : 0,
       wireframe: shading === 'wire' || !!m.wire,
-      side: mirrored || p.kind === 'plane' || p.kind === 'text' || p.kind === 'lathe' || (p.kind === 'torus' && (p.arc ?? 360) < 360) ? THREE.DoubleSide : THREE.FrontSide,
+      side: mirrored || p.kind === 'plane' || p.kind === 'drape' || (p.kind === 'sculpt' && p.base === 'panel') || p.kind === 'text' || p.kind === 'lathe' || (p.kind === 'torus' && (p.arc ?? 360) < 360) ? THREE.DoubleSide : THREE.FrontSide,
       depthWrite: shading !== 'xray',
     })
     if (text) mt.color.set(m.color)
     return mt
-  }, [m.color, m.metal, m.rough, m.glow, m.opacity, m.led, m.wire, shading, led, map, text, mirrored, p.kind, p.arc])
+  }, [m.color, m.metal, m.rough, m.glow, m.opacity, m.led, m.wire, shading, led, map, text, mirrored, p.kind, p.arc, p.base])
   useEffect(() => () => mat.dispose(), [mat])
   return mat
 }
@@ -216,42 +371,86 @@ export function PartsScene({
   )
 }
 
-function instances(p: Part): { pos: [number, number, number]; rotY: number }[] {
-  const a = p.array
-  if (!a || a.count <= 1) return [{ pos: [0, 0, 0], rotY: 0 }]
-  const n = Math.min(200, Math.max(1, Math.round(a.count)))
-  if (a.mode === 'radial') {
-    const sweep = THREE.MathUtils.degToRad(a.angle ?? 360)
-    const step = Math.abs(sweep - Math.PI * 2) < 1e-3 ? sweep / n : sweep / Math.max(1, n - 1)
-    return Array.from({ length: n }, (_, i) => ({ pos: [0, 0, 0], rotY: i * step }))
-  }
-  return Array.from({ length: n }, (_, i) => ({ pos: toThree([a.offset[0] * i, a.offset[1] * i, a.offset[2] * i]), rotY: 0 }))
+// The fields that decide a part's shape (not its place, colour or name), for rebuilding only when needed.
+function geoKey(p: Part) {
+  return JSON.stringify([p.kind, p.w, p.h, p.d, p.seg, p.bevel, p.steps, p.arc, p.thick, p.profile, p.text, p.taper, p.twist, p.bend, p.organic, p.seed, p.base, p.res, p.holes, p.plane, p.closed, p.form, p.swags, p.sag, p.cage, p.solid, p.array?.mode === 'surface'])
 }
 
-function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: boolean }) {
+// Copies of a part: its own array, or along its parent curve.
+function copiesOf(p: Part, all: Part[]) {
+  const parent = p.array?.mode === 'path' ? all.find((x) => x.id === p.parent && x.kind === 'path') : undefined
+  return instances(p, parent ? (n) => alongCurve(parent, p, n) : undefined)
+}
+
+function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean; root?: boolean; copy?: number }) {
   const ctx = useContext(PartsCtx)!
-  const geo = useMemo(() => partGeometry(p), [p])
+  // 3D letters: ask for the font, and rebuild once it has arrived.
+  const fontReady = useSyncExternalStore(subscribeFont, fontState)
+  useEffect(() => void (p.kind === 'text' && p.solid && requestFont()), [p.kind, p.solid])
+  // Scattered copies are small and many: build them with fewer sides (detail they would not show anyway),
+  // so hundreds of flowers stay light on ordinary laptops.
+  // Rebuilt only when the shape itself changes (not on moves, renames, colour or other parts' edits).
+  const gk = geoKey(p)
+  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [gk, p.sculpt, fontReady]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => geo?.dispose(), [geo])
-  const mat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
+  // Holes: cutters in the same group are taken out of this part (worked out once per edit).
+  const cutters = !p.cutter && p.parent && p.kind !== 'group' && p.array?.mode !== 'surface' ? ctx.all.filter((h) => h.cutter && h.parent === p.parent && h.id !== p.id && !h.hidden && h.kind !== 'group') : NO_CUTTERS
+  const ck = cutters.length ? JSON.stringify([p.pos, p.rot, p.scl, cutters.map((h) => [geoKey(h), h.pos, h.rot, h.scl])]) : ''
+  const csg = useSyncExternalStore(subscribeCsg, csgReady)
+  useEffect(() => void (ck && requestCsg()), [ck])
+  const cut = useMemo(() => {
+    if (!ck || !geo || !csg) return null
+    const inv = partMatrix(p).invert()
+    const list = cutters.map((h) => ({ geo: partGeometry(h), matrix: inv.clone().multiply(partMatrix(h)) })).filter((x): x is { geo: THREE.BufferGeometry; matrix: THREE.Matrix4 } => !!x.geo)
+    const out = cutGeometry(geo, list)
+    list.forEach((x) => x.geo.dispose())
+    return out
+  }, [geo, ck, csg]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => cut?.dispose(), [cut])
+  const shape = cut ?? geo
+  const partMat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
+  const mat = p.cutter ? CUTTER_MAT : partMat
+  // Alternating copies share one second material in the alternate colour.
+  const altColor = p.array?.alt
+  const altMat = useMemo(() => {
+    if (!altColor || !(mat instanceof THREE.MeshStandardMaterial)) return null
+    const m = mat.clone()
+    m.color.set(altColor)
+    return m
+  }, [mat, altColor])
+  useEffect(() => () => altMat?.dispose(), [altMat])
   const kids = childrenOf(ctx.all, p.id)
+  // Scatter: copies spread over the parent's surface, drawn as one instanced batch.
+  const surface = p.array?.mode === 'surface' ? ctx.all.find((x) => x.id === p.parent && x.kind !== 'group') : undefined
+  const sk = surface && p.array ? `${geoKey(surface)}|${surface.sculpt?.length ?? 0}|${JSON.stringify([p.pos, p.rot, p.scl, p.array, p.seed])}` : ''
+  const scatter = useMemo(() => (surface && p.array ? scatterMatrices(surface, p) : null), [sk]) // eslint-disable-line react-hooks/exhaustive-deps
   if (p.hidden) return null
+  // Cutters show (as a red ghost) only while editing; the client view, renders and exports never see them.
+  if (p.cutter && !ctx.register) return null
+  if (scatter && geo)
+    return (
+      <group ref={mirrored || !ctx.register || copy > 0 ? undefined : (o) => ctx.register!(p.id, o)} position={toThree(p.pos)} rotation={rotToThree(p.rot)} scale={toThree(p.scl)} userData={{ partId: p.id, root }}>
+        <Scattered geo={geo} mat={mat} alt={altMat} data={scatter} shadows={ctx.shadows} onPick={ctx.onPick && !mirrored ? (e) => (e.stopPropagation(), ctx.onPick!(p.id, e)) : undefined} />
+      </group>
+    )
   const radius = p.array?.mode === 'radial' ? (p.array.radius ?? 2) : 0
   const sel = !mirrored && ctx.selected?.has(p.id)
   return (
     <group
-      ref={mirrored || !ctx.register ? undefined : (o) => ctx.register!(p.id, o)}
+      ref={mirrored || !ctx.register || copy > 0 ? undefined : (o) => ctx.register!(p.id, o)}
       position={toThree(p.pos)}
       rotation={rotToThree(p.rot)}
       scale={toThree(p.scl)}
       userData={{ partId: p.id, root }}
     >
-      {instances(p).map((ins, i) => (
-        <group key={i} position={ins.pos} rotation-y={ins.rotY}>
+      {copiesOf(p, ctx.all).map((ins, i) => (
+        <group key={i} position={ins.pos} rotation={[0, ins.rotY, ins.rotZ ?? 0]} scale={[ins.flip ? -1 : 1, ins.sy, 1]}>
           <group position={[0, 0, radius]}>
-            {geo && (
+            {shape && (
               <mesh
-                geometry={geo}
-                material={mat}
+                geometry={shape}
+                userData={p.cutter ? { helper: true } : undefined}
+                material={ins.alt && altMat ? altMat : mat}
                 castShadow={ctx.shadows}
                 receiveShadow={ctx.shadows}
                 onClick={
@@ -264,9 +463,9 @@ function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: b
                 }
               />
             )}
-            {sel && geo && i === 0 && <SelOutline geo={geo} />}
+            {sel && shape && i === 0 && <SelOutline geo={shape} />}
             {kids.map((k) => (
-              <PartNode key={k.id} p={k} mirrored={mirrored} />
+              <PartNode key={k.id} p={k} mirrored={mirrored} copy={Math.max(copy, i)} />
             ))}
           </group>
         </group>
@@ -275,9 +474,72 @@ function PartNode({ p, mirrored, root }: { p: Part; mirrored?: boolean; root?: b
   )
 }
 
+// Seeded positions on the parent's surface, each copy standing on the surface, spun and sized at random.
+function scatterMatrices(surface: Part, p: Part): THREE.Matrix4[] | null {
+  const src = partGeometry(surface)
+  if (!src) return null
+  const g = src.index ? src.toNonIndexed() : src
+  let seed = Math.abs(Math.round((p.seed ?? 1) * 7919)) % 233280 || 1
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280
+  const sampler = new MeshSurfaceSampler(new THREE.Mesh(g))
+  // Seeded so the same settings always give the same arrangement (method exists in three; types lag behind).
+  ;(sampler as unknown as { setRandomGenerator: (f: () => number) => void }).setRandomGenerator(rnd)
+  sampler.build()
+  const n = Math.max(1, Math.min(1500, Math.round(p.array!.count)))
+  // Samples are in the surface's space; copies live inside the scatter part, so undo the part's own transform.
+  const own = new THREE.Matrix4()
+    .compose(new THREE.Vector3(...toThree(p.pos)), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotToThree(p.rot))), new THREE.Vector3(...toThree(p.scl)))
+    .invert()
+  const pos = new THREE.Vector3()
+  const nrm = new THREE.Vector3()
+  const up = new THREE.Vector3(0, 1, 0)
+  const out: THREE.Matrix4[] = []
+  const spin = THREE.MathUtils.degToRad(p.array!.turn ?? 360)
+  const vary = Math.max(0, Math.min(0.9, p.array!.grow ?? 0.3))
+  for (let i = 0; i < n; i++) {
+    sampler.sample(pos, nrm)
+    const q = new THREE.Quaternion().setFromUnitVectors(up, nrm.normalize())
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(up, rnd() * spin))
+    const s = 1 - vary + rnd() * vary * 2
+    out.push(own.clone().multiply(new THREE.Matrix4().compose(pos, q, new THREE.Vector3(s, s, s))))
+  }
+  if (g !== src) g.dispose()
+  src.dispose()
+  return out
+}
+
+function Scattered({ geo, mat, data, shadows, onPick }: { geo: THREE.BufferGeometry; mat: THREE.Material; alt?: THREE.Material | null; data: THREE.Matrix4[]; shadows: boolean; onPick?: (e: ThreeEvent<MouseEvent>) => void }) {
+  const mesh = useMemo(() => {
+    const m = new THREE.InstancedMesh(geo, mat, data.length)
+    data.forEach((mx, i) => m.setMatrixAt(i, mx))
+    m.instanceMatrix.needsUpdate = true
+    m.computeBoundingSphere()
+    return m
+  }, [geo, mat, data])
+  useEffect(() => () => mesh.dispose(), [mesh])
+  return <primitive object={mesh} castShadow={shadows} receiveShadow={shadows} onClick={onPick} />
+}
+
 const outlineMat = new THREE.LineBasicMaterial({ color: '#ff9a1f', depthTest: false, transparent: true, opacity: 0.9 })
+const NO_CUTTERS: Part[] = []
+const CUTTER_MAT = new THREE.MeshStandardMaterial({ color: '#ff4d6d', transparent: true, opacity: 0.28, depthWrite: false, roughness: 1 })
+/** A part's placement inside its group, as a matrix. */
+function partMatrix(q: Part) {
+  return new THREE.Matrix4().compose(new THREE.Vector3(...toThree(q.pos)), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotToThree(q.rot))), new THREE.Vector3(...toThree(q.scl)))
+}
+
 function SelOutline({ geo }: { geo: THREE.BufferGeometry }) {
-  const edges = useMemo(() => new THREE.EdgesGeometry(geo, 25), [geo])
+  // Dense meshes (sculpts, organic shapes) get a bounding box instead of every hard edge.
+  const edges = useMemo(() => {
+    if (geo.getAttribute('position').count <= 20000) return new THREE.EdgesGeometry(geo, 25)
+    geo.computeBoundingBox()
+    const b = geo.boundingBox!
+    const box = new THREE.BoxGeometry(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z)
+    box.translate((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2)
+    const e = new THREE.EdgesGeometry(box)
+    box.dispose()
+    return e
+  }, [geo])
   useEffect(() => () => edges.dispose(), [edges])
-  return <lineSegments geometry={edges} material={outlineMat} renderOrder={10} />
+  return <lineSegments geometry={edges} material={outlineMat} renderOrder={10} userData={{ helper: true }} />
 }

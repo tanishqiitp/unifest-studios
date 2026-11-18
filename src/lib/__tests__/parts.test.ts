@@ -55,3 +55,67 @@ describe('3D parts', () => {
     expect(liteProject(p, true).parts?.[0].mat.map).toBeDefined()
   })
 })
+
+describe('festival stage builder', () => {
+  it('builds an editable tree: stage → centre and wings → panels', async () => {
+    const { buildAssembly, childrenOf } = await import('../parts')
+    const { generateProject, TEMPLATES } = await import('../templates')
+    const parts = buildAssembly(generateProject(TEMPLATES[0]), 'festival')
+    const root = parts.find((x) => !x.parent)!
+    const names = childrenOf(parts, root.id).map((x) => x.name)
+    expect(names).toEqual(expect.arrayContaining(['Centre structure', 'Left wing', 'Right wing', 'Left tower', 'Right tower']))
+    // It uses the existing stage instead of adding a second platform on top of it.
+    expect(names).not.toContain('Platform')
+    const empty = buildAssembly({ ...generateProject(TEMPLATES[0]), decks: [] }, 'festival')
+    expect(empty.some((x) => x.name === 'Platform')).toBe(true)
+    // The main LED fits inside the smallest arch opening (legs 0.4 m each side).
+    const led = parts.find((x) => x.name === 'Main LED')!
+    const arch1 = parts.find((x) => x.name === 'Arch 1')!
+    expect(arch1.w - 0.8).toBeGreaterThan(led.w)
+    const centre = parts.find((x) => x.name === 'Centre structure')!
+    expect(childrenOf(parts, centre.id).filter((x) => /Arch/.test(x.name))).toHaveLength(3)
+  })
+  it('arrays grow, mirror symmetrically and alternate', async () => {
+    const { instances } = await import('../partArrays')
+    const { newPart } = await import('../parts')
+    const p = newPart('box', [0, 0, 0], { array: { mode: 'linear', count: 5, offset: [1, 0, 0], grow: 0.1, symmetric: true, alt: '#fff' } })
+    const ins = instances(p)
+    expect(ins).toHaveLength(5)
+    expect(ins.filter((i) => i.flip)).toHaveLength(2)
+    expect(Math.max(...ins.map((i) => i.sy))).toBeCloseTo(1.2)
+    expect(ins.some((i) => i.alt)).toBe(true)
+  })
+})
+
+describe('Celestial Crown (sculpted)', () => {
+  it('is an editable tree built from sculpt, bend, twist and growing arrays', async () => {
+    const { buildAssembly, childrenOf, slimArch } = await import('../parts')
+    const { generateProject, TEMPLATES } = await import('../templates')
+    const parts = buildAssembly(generateProject(TEMPLATES[0]), 'crown')
+    const root = parts.find((x) => !x.parent)!
+    expect(childrenOf(parts, root.id).map((x) => x.name)).toEqual(expect.arrayContaining(['Heart', 'Spire crown', 'Left wing', 'Right wing', 'Ribbon arches']))
+    expect(parts.find((x) => x.name === 'Sculpted LED orb')!.organic).toBeGreaterThan(0)
+    expect(parts.filter((x) => x.bend).length).toBeGreaterThanOrEqual(3)
+    expect(parts.filter((x) => x.array?.mode === 'radial' && x.array.grow).length).toBe(2)
+    expect(parts.every((x) => x.id && (x.parent === undefined || parts.some((q) => q.id === x.parent)))).toBe(true)
+    // The slim arch outline is closed and stays inside 0..1.
+    expect(slimArch(0.05).every(([u, v]) => u >= -1e-9 && u <= 1 + 1e-9 && v >= 0 && v <= 1)).toBe(true)
+  })
+})
+
+describe('Floral Mandap', () => {
+  it('uses the new tools and keeps the arch standing on the podium', async () => {
+    const { buildAssembly } = await import('../parts')
+    const { generateProject, TEMPLATES } = await import('../templates')
+    const parts = buildAssembly(generateProject(TEMPLATES[0]), 'mandap')
+    const kinds = new Set(parts.map((x) => x.kind))
+    for (const k of ['drape', 'path', 'text', 'lathe', 'dome']) expect(kinds.has(k as never)).toBe(true)
+    expect(parts.some((x) => x.array?.mode === 'surface')).toBe(true)
+    expect(parts.some((x) => x.holes)).toBe(true)
+    expect(parts.some((x) => x.cage)).toBe(true)
+    const arch = parts.find((x) => x.name === 'Floral arch')!
+    const topTier = parts.find((x) => x.name === 'Podium tier 3')!
+    const legReach = Math.hypot(arch.w / 2, arch.pos[1])
+    expect(legReach).toBeLessThan(topTier.w / 2)
+  })
+})

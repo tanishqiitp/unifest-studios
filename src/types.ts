@@ -323,6 +323,7 @@ export interface Project {
   decor?: Decor[]
   set?: SetPiece[]
   parts?: Part[] // free 3D parts from the Model workspace
+  views?: SavedView[] // named camera positions in the Model workspace
   setContent?: string // image (data URL) or video link spread across all LED skins
   brand?: Brand
   quote?: QuoteSettings
@@ -338,8 +339,20 @@ export interface Project {
 
 // ---------- Model workspace: free 3D parts (Blender-style) ----------
 // Venue axes: x across, y depth (towards the audience), z up. Geometry origin is the bottom centre.
-export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text'
+export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text' | 'sculpt' | 'path' | 'drape'
 export type Vec3 = [number, number, number]
+export interface SavedView {
+  id: string
+  name: string
+  pos: Vec3 // three.js coordinates
+  target: Vec3
+}
+export interface Cutouts {
+  shape: 'circle' | 'square' | 'arch' | 'diamond'
+  cols: number
+  rows: number
+  size: number // 0.1..0.95 of each cell
+}
 export interface PartMat {
   color: string
   metal: number // 0..1
@@ -351,11 +364,15 @@ export interface PartMat {
   wire?: boolean
 }
 export interface PartArray {
-  mode: 'linear' | 'radial'
+  mode: 'linear' | 'radial' | 'path' | 'surface' // path: along the parent curve; surface: scattered over the parent
   count: number
   offset: Vec3 // linear: step between copies (x, y, z metres)
   radius?: number // radial: distance from the centre
   angle?: number // radial: total sweep in degrees (360 = full circle)
+  grow?: number // each copy is this much taller than the previous (0.1 = +10%); with symmetric, grows outwards
+  turn?: number // each copy turns this many more degrees about the vertical
+  symmetric?: boolean // linear: copies spread both ways from the original, mirrored
+  alt?: string // every other copy uses this colour
 }
 export interface Part {
   id: string
@@ -375,6 +392,23 @@ export interface Part {
   thick?: number // torus tube thickness, metres
   profile?: [number, number][] // lathe (radius, height) or extrude (across, up), 0..1 of the size
   text?: string
+  taper?: number // top size as a fraction of the bottom (1 = straight, 0.3 = pointed)
+  twist?: number // degrees turned from bottom to top
+  bend?: number // degrees the width curls into an arc (180 = a standing arch)
+  organic?: number // 0..1: smooth sculpted bumps over the surface
+  cutter?: boolean // a hole: cut out of the other parts in the same group, not drawn itself
+  seed?: number // changes the organic pattern
+  base?: 'sphere' | 'panel' | 'block' // sculpt: starting shape
+  res?: 'low' | 'medium' | 'high' // sculpt: point density
+  sculpt?: string // sculpt: packed positions (see lib/sculpt.ts)
+  holes?: Cutouts // openings cut through a box or extruded shape
+  plane?: 'front' | 'top' // curve: drawn in the side view (up/across) or the top view (floor plan)
+  closed?: boolean // curve: loops back to the start
+  form?: 'tube' | 'ribbon' | 'guide' // curve: what is built along it
+  swags?: number // drape: scallops along the top (0 = straight curtain)
+  sag?: number // drape: how deep the swags dip, 0..0.9 of the drop
+  cage?: { front?: number[]; side?: number[] } // cage deform handles (see lib/cage.ts)
+  solid?: boolean // text: extruded 3D letters instead of a flat sign
   mat: PartMat
   array?: PartArray
   mirror?: boolean // live copy across the venue centre line (top-level parts)
