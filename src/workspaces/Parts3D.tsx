@@ -5,7 +5,7 @@ import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.j
 import { drapeGeometry } from '../lib/drape'
 import { alongCurve, curveGeometry } from '../lib/curves'
 import { cutoutPaths } from '../lib/cutouts'
-import { decodeSculpt, sculptBase } from '../lib/sculpt'
+import { decodePaint, decodeSculpt, sculptBase } from '../lib/sculpt'
 import { instances } from '../lib/partArrays'
 import { geodomeGeometry, helixGeometry, treeGeometry, trussGeometry } from '../lib/frames'
 import { meshVersion, subscribeMesh, unitMesh } from '../lib/meshImport'
@@ -84,6 +84,9 @@ function sculptGeometry(p: Part) {
   if (saved) pos.array.set(saved)
   else g.scale(p.w, p.h, p.d)
   pos.needsUpdate = true
+  // Painted colours, if any (drawn with vertex colours; the part colour shows where nothing was painted).
+  const cols = p.paint ? decodePaint(p.paint, pos.count) : null
+  if (cols) g.setAttribute('color', new THREE.BufferAttribute(cols, 3))
   g.computeVertexNormals()
   g.computeBoundingSphere()
   return g
@@ -310,6 +313,7 @@ function usePartMaterial(p: Part, shading: Shading, led: THREE.Texture | null, m
   const flatText = p.kind === 'text' && !(p.solid && fontReady)
   const text = useMemo(() => (flatText ? textTexture(p.text || ' ', p.w, p.h) : null), [flatText, p.text, p.w, p.h])
   useEffect(() => () => text?.dispose(), [text])
+  const painted = p.kind === 'sculpt' && !!p.paint
   const mat = useMemo(() => {
     const solid = shading === 'solid'
     const tex = solid ? null : m.led ? led : map
@@ -330,8 +334,12 @@ function usePartMaterial(p: Part, shading: Shading, led: THREE.Texture | null, m
       depthWrite: shading !== 'xray',
     })
     if (text) mt.color.set(m.color)
+    if (painted && !solid) {
+      mt.vertexColors = true
+      mt.color.set('#ffffff')
+    }
     return mt
-  }, [m.color, m.metal, m.rough, m.glow, m.opacity, m.led, m.wire, shading, led, map, text, mirrored, p.kind, p.arc, p.base])
+  }, [m.color, m.metal, m.rough, m.glow, m.opacity, m.led, m.wire, shading, led, map, text, mirrored, p.kind, p.arc, p.base, painted])
   useEffect(() => () => mat.dispose(), [mat])
   return mat
 }
@@ -407,7 +415,7 @@ function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean
   // so hundreds of flowers stay light on ordinary laptops.
   // Rebuilt only when the shape itself changes (not on moves, renames, colour or other parts' edits).
   const gk = geoKey(p)
-  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [gk, p.sculpt, fontReady, p.kind === 'mesh' ? meshReady : 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [gk, p.sculpt, p.paint, fontReady, p.kind === 'mesh' ? meshReady : 0]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => geo?.dispose(), [geo])
   // Holes: cutters in the same group are taken out of this part (worked out once per edit).
   const cutters = !p.cutter && p.parent && p.kind !== 'group' && p.array?.mode !== 'surface' ? ctx.all.filter((h) => h.cutter && h.parent === p.parent && h.id !== p.id && !h.hidden && h.kind !== 'group') : NO_CUTTERS

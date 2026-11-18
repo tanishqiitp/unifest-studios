@@ -396,6 +396,7 @@ export interface Part {
   twist?: number // degrees turned from bottom to top
   bend?: number // degrees the width curls into an arc (180 = a standing arch)
   organic?: number // 0..1: smooth sculpted bumps over the surface
+  paint?: string // sculpt: painted colour per point (p1:base64 RGB)
   zUp?: boolean // imported file is Z-up (STL, CAD): stood upright when loaded
   modelId?: string // imported 3D file (kind 'mesh'), kept in this browser's model store
   cutter?: boolean // a hole: cut out of the other parts in the same group, not drawn itself

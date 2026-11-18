@@ -2,7 +2,7 @@ import { StudioEnv } from './StudioEnv'
 import { CURVE_PRESETS } from '../lib/curvePresets'
 import { fontState, subscribeFont } from '../lib/text3d'
 import { CAGE_PRESETS, EMPTY_CAGE, hasCage } from '../lib/cage'
-import { BRUSHES, SculptSession, useSculpt } from './Sculpt'
+import { BRUSHES, SculptSession, hasMask, sculptAction, useSculpt } from './Sculpt'
 import { useGlCreated } from '../components/Safe3D'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
@@ -1539,6 +1539,8 @@ function ProfileEditor({ p }: { p: Part }) {
 // Brush sculpting controls for a "Sculpt clay" part.
 function SculptPanel({ p }: { p: Part }) {
   const sc = useSculpt()
+  const objs = useModel((s) => s.objs)
+  const masked = sc.maskVer >= 0 && hasMask(p.id)
   const up = (patch: Partial<Part>) => updatePart(p.id, patch)
   const restart = (patch: Partial<Part>) => {
     if (p.sculpt && !confirm('This starts the sculpt again from the plain shape. Your current sculpting is lost (Ctrl+Z brings it back). Continue?')) return
@@ -1551,15 +1553,37 @@ function SculptPanel({ p }: { p: Part }) {
       </button>
       <div className="grid grid-cols-3 gap-1">
         {BRUSHES.map((b) => (
-          <button key={b.id} className={`btn h-8 text-[11px] justify-center ${sc.brush === b.id ? 'btn-on' : ''}`} title={b.tip} onClick={() => sc.set({ brush: b.id, on: true })}>
+          <button key={b.id} className={`btn h-8 px-1 text-[11px] justify-center ${sc.brush === b.id ? 'btn-on' : ''}`} title={b.tip} onClick={() => sc.set({ brush: b.id, on: true })}>
             {b.name}
           </button>
         ))}
       </div>
+      <p className="text-[10px] text-mute leading-snug">{BRUSHES.find((b) => b.id === sc.brush)?.tip}</p>
+      {sc.brush === 'paint' && (
+        <label className="flex items-center gap-2 text-[11px]">
+          <input type="color" value={sc.color} onChange={(e) => sc.set({ color: e.target.value })} className="h-7 w-10 rounded border border-line bg-transparent" aria-label="Paint colour" />
+          Paint colour
+          {p.paint && (
+            <button className="btn h-7 px-2 ml-auto text-[11px]" title="Remove all paint (Ctrl+Z brings it back)" onClick={() => sculptAction(p, objs[p.id], 'unpaint')}>
+              Remove paint
+            </button>
+          )}
+        </label>
+      )}
+      {(sc.brush === 'mask' || masked) && (
+        <div className="grid grid-cols-2 gap-1">
+          <button className="btn h-7 justify-center text-[11px]" title="Masked becomes free and free becomes masked" onClick={() => sculptAction(p, objs[p.id], 'invert')}>
+            Invert mask
+          </button>
+          <button className="btn h-7 justify-center text-[11px]" disabled={!masked} onClick={() => sculptAction(p, objs[p.id], 'clear')}>
+            Clear mask
+          </button>
+        </div>
+      )}
       <Slider label={`Radius ${sc.radius.toFixed(2)} m  ([ and ])`} value={sc.radius} min={0.05} max={Math.max(1, Math.max(p.w, p.h, p.d) * 0.6)} onChange={(radius) => sc.set({ radius })} />
       <Slider label={`Strength ${Math.round(sc.strength * 100)}%`} value={sc.strength} onChange={(strength) => sc.set({ strength })} />
       <Check label="Mirror left and right" checked={sc.sym} onChange={(sym) => sc.set({ sym })} tip="Every stroke is repeated on the other side of the part." />
-      <p className="text-[10px] text-mute leading-relaxed">Drag on the shape to sculpt. Ctrl inverts (carve, shrink, spread); Shift smooths. Drag off the shape to orbit. Each stroke is one undo step.</p>
+      <p className="text-[10px] text-mute leading-relaxed">Drag on the shape to sculpt. Ctrl inverts (carve, shrink, spread); Shift smooths. Drag off the shape to orbit. Each stroke is one undo step. A drawing pen's pressure sets the strength.</p>
       <div className="grid grid-cols-2 gap-2">
         <Sel
           label="Start from"
@@ -1588,6 +1612,11 @@ function SculptPanel({ p }: { p: Part }) {
         <Num label="Depth" value={p.d} onChange={(d) => up({ d: Math.max(0.05, d) })} unit="m" step={0.1} />
         <Num label="Height" value={p.h} onChange={(h) => up({ h: Math.max(0.05, h) })} unit="m" step={0.1} />
       </div>
+      {p.sculpt && (
+        <button className="btn w-full justify-center text-[11px]" title="Soften the whole shape a little (masked areas stay as they are)" onClick={() => sculptAction(p, objs[p.id], 'relax')}>
+          Relax whole shape
+        </button>
+      )}
       {p.sculpt && (
         <button className="btn w-full justify-center text-[11px]" onClick={() => confirm('Reset the sculpt to the plain shape? (Ctrl+Z undoes this.)') && up({ sculpt: undefined })}>
           Reset shape
