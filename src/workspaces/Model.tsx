@@ -14,10 +14,13 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Crosshair,
+  ArrowDownToLine,
   Download,
   Eye,
   EyeOff,
   Focus,
+  ScanEye,
   Folder,
   Group as GroupIcon,
   ImageIcon,
@@ -42,6 +45,7 @@ import { useTheme } from '../lib/theme'
 import { fmt } from '../lib/calc'
 import { Check, Num, Section, Sel, Stat } from '../components/ui'
 import { PartsScene, fromThree, rotFromThree, type Shading } from './Parts3D'
+import { alignMoves, boundsOf, distributeMoves, dropMove, gapBetween, matchScale, sizeOf, snapToParts, stackMove, type Axis3, type Box, type Edge } from '../lib/arrange'
 import { SetItems } from './Set3D'
 import { Things } from './SetCad3D'
 import { readImage } from './Decor'
@@ -65,6 +69,12 @@ interface ModelUI {
   view: { v: View; n: number }
   frame: number
   person: boolean // 1.75 m figure for scale
+  snapParts: boolean // edges and centres catch nearby parts while moving
+  isolate: string[] | null // show only these parts (and what's inside them)
+  guides: [number, number, number][][] // snap lines while dragging, three.js coordinates
+  dupOf: string[] // the copies made by the last duplicate
+  dupBase: { pos: Vec3; rot: Vec3 } | null // where the copied part was, to learn the repeat step
+  rep: { d: Vec3; r: Vec3 } | null // Ctrl+D: the move and turn to repeat on the next copy
   objs: Record<string, THREE.Object3D>
   set: (p: Partial<ModelUI>) => void
 }
@@ -78,6 +88,12 @@ export const useModel = create<ModelUI>((set) => ({
   view: { v: 'iso', n: 0 },
   frame: 0,
   person: true,
+  snapParts: true,
+  isolate: null,
+  guides: [],
+  dupOf: [],
+  dupBase: null,
+  rep: null,
   objs: {},
   set: (p) => set(p),
 }))
@@ -99,6 +115,135 @@ function recolour(groupId: string, pal: PartMat[]) {
   })
 }
 const updatePart = (id: string, patch: Partial<Part>) => editParts((ps) => ps.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+const notify = (m: string) => useStore.getState().notify(m)
+
+// ---------------------------------------------------------------- arranging (align, spread, drop, stack, snap)
+
+/** The space a part takes up on stage (venue axes), measured from what is drawn. */
+function boxOf(id: string | undefined): Box | null {
+  const o = id ? useModel.getState().objs[id] : undefined
+  if (!o?.parent) return null
+  const b = new THREE.Box3().setFromObject(o)
+  if (b.isEmpty()) return null
+  return { min: [b.min.x, b.min.z, b.min.y], max: [b.max.x, b.max.z, b.max.y] }
+}
+function ancestorsOf(ps: Part[], id: string) {
+  const out: string[] = []
+  let p = ps.find((x) => x.id === id)
+  while (p?.parent) {
+    out.push(p.parent)
+    p = ps.find((x) => x.id === p!.parent)
+  }
+  return out
+}
+/** Everything else to line up with: not the selection, what's inside it, or the groups it sits in. */
+function otherBoxes(sel: string[]): Box[] {
+  const ps = parts()
+  const skip = new Set<string>()
+  for (const id of sel) {
+    skip.add(id)
+    descendants(ps, id).forEach((d) => skip.add(d.id))
+    ancestorsOf(ps, id).forEach((a) => skip.add(a))
+  }
+  return ps
+    .filter((p) => !skip.has(p.id) && !p.hidden && p.array?.mode !== 'surface')
+    .map((p) => boxOf(p.id))
+    .filter((b): b is Box => !!b)
+}
+/** Selected parts that can move: unlocked, and not inside another selected group (it moves with it). */
+function movable() {
+  const { sel } = useModel.getState()
+  const ps = parts()
+  return sel
+    .filter((id) => {
+      const p = ps.find((x) => x.id === id)
+      return p && !p.locked && !ancestorsOf(ps, id).some((a) => sel.includes(a))
+    })
+    .map((id) => ({ id, box: boxOf(id) }))
+    .filter((x): x is { id: string; box: Box } => !!x.box)
+}
+/** Move parts by stage amounts in one undo step, whatever group they sit in. */
+function moveParts(moves: Map<string, Vec3>) {
+  const objs = useModel.getState().objs
+  const pos = new Map<string, Vec3>()
+  for (const [id, d] of moves) {
+    const o = objs[id]
+    if (!o?.parent || Math.abs(d[0]) + Math.abs(d[1]) + Math.abs(d[2]) < 1e-6) continue
+    o.parent.updateWorldMatrix(true, false)
+    const w = o.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(d[0], d[2], d[1]))
+    pos.set(id, fromThree(o.parent.worldToLocal(w)).map((n) => Math.round(n * 1000) / 1000) as Vec3)
+  }
+  if (pos.size) editParts((ps) => ps.map((p) => (pos.has(p.id) ? { ...p, pos: pos.get(p.id)! } : p)))
+  return pos.size
+}
+const AXIS_NAME = ['across', 'in depth', 'up'] as const
+function alignSel(axis: Axis3, edge: Edge, toSelection: boolean) {
+  const items = movable()
+  const ref = toSelection ? boundsOf(items.map((x) => x.box)) : boxOf(useModel.getState().sel.at(-1))
+  if (items.length < 2 || !ref) return notify('Select two or more parts to line up. The last one you pick stays put.')
+  const m = alignMoves(items.map((x) => x.box), axis, edge, ref)
+  moveParts(new Map(items.map((x, i) => [x.id, m[i]])))
+}
+function distributeSel(axis: Axis3, gap?: number) {
+  const items = movable()
+  if (items.length < (gap === undefined ? 3 : 2)) return notify(gap === undefined ? 'Select three or more parts to space evenly' : 'Select two or more parts to line up')
+  const m = distributeMoves(items.map((x) => x.box), axis, gap)
+  moveParts(new Map(items.map((x, i) => [x.id, m[i]])))
+  notify(gap === undefined ? `Spaced ${items.length} parts evenly ${AXIS_NAME[axis]}` : `Lined up ${items.length} parts ${AXIS_NAME[axis]}, ${gap} m apart`)
+}
+/** Drop each selected part onto whatever is under it (another part, or the floor). Lowest first, so piles settle. */
+export function dropSel() {
+  const items = movable().sort((a, b) => a.box.min[2] - b.box.min[2])
+  if (!items.length) return
+  const support = otherBoxes(useModel.getState().sel)
+  const moves = new Map<string, Vec3>()
+  for (const x of items) {
+    const d = dropMove(x.box, support)
+    moves.set(x.id, d)
+    support.push({ min: [x.box.min[0], x.box.min[1], x.box.min[2] + d[2]], max: [x.box.max[0], x.box.max[1], x.box.max[2] + d[2]] })
+  }
+  const n = moveParts(moves)
+  notify(n ? `Dropped ${n === 1 ? 'onto what is below' : `${n} parts onto what is below`}` : 'Already resting on what is below')
+}
+/** Stack the other selected parts, centred, on top of the last one picked. */
+function stackSel() {
+  const { sel } = useModel.getState()
+  let ref = boxOf(sel.at(-1))
+  const items = movable().filter((x) => x.id !== sel.at(-1)).sort((a, b) => a.box.min[2] - b.box.min[2])
+  if (!ref || !items.length) return notify('Select the parts to stack, then the one to stack them on last')
+  const moves = new Map<string, Vec3>()
+  for (const x of items) {
+    const d = stackMove(x.box, ref)
+    moves.set(x.id, d)
+    ref = { min: [x.box.min[0] + d[0], x.box.min[1] + d[1], x.box.min[2] + d[2]], max: [x.box.max[0] + d[0], x.box.max[1] + d[1], x.box.max[2] + d[2]] }
+  }
+  moveParts(moves)
+}
+/** Scale the other selected parts to the size of the last one picked. */
+function matchSel(axes: [boolean, boolean, boolean]) {
+  const { sel } = useModel.getState()
+  const ref = boxOf(sel.at(-1))
+  const items = movable().filter((x) => x.id !== sel.at(-1))
+  if (!ref || !items.length) return notify('Select the parts to resize, then the one whose size to copy last')
+  const scl = new Map(items.map((x) => [x.id, x.box]))
+  editParts((ps) => ps.map((p) => (scl.has(p.id) ? { ...p, scl: matchScale(scl.get(p.id)!, ref, p.scl, axes) } : p)))
+}
+/** Pick every part like the active one: same kind and colour. */
+export function selectSimilar() {
+  const { sel, set } = useModel.getState()
+  const ps = parts()
+  const a = ps.find((p) => p.id === sel.at(-1))
+  if (!a) return
+  const ids = ps.filter((p) => !p.hidden && p.kind === a.kind && (a.kind === 'group' || p.mat.color === a.mat.color) && p.array?.mode !== 'surface').map((p) => p.id)
+  set({ sel: ids })
+  notify(`Selected ${ids.length} similar ${ids.length === 1 ? 'part' : 'parts'}`)
+}
+/** Show only the selection (Blender's local view); press again to bring everything back. */
+export function toggleIsolate() {
+  const { isolate, sel, set } = useModel.getState()
+  if (isolate) return set({ isolate: null })
+  if (sel.length) set({ isolate: [...sel], frame: useModel.getState().frame + 1 })
+}
 
 // Clicking selects the outermost group (like picking an object); double-click picks the exact part.
 function topOf(all: Part[], id: string) {
@@ -142,7 +287,7 @@ export function ModelWorkspace() {
         <Viewport root={root} />
         <Toolbar root={root} />
         <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden lg:block">
-          G move · R rotate · S scale · X/Y/Z lock axis · Shift+D duplicate · Ctrl+G group · H hide · F frame · Numpad 1/3/7 views · M snap
+          G move · R rotate · S scale · X/Y/Z lock axis · Shift+D duplicate · Ctrl+D repeat · End drop · / isolate · Shift+G similar · Ctrl+G group · H hide · F frame · Alt free move
         </div>
       </div>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">{active ? <Props p={active} /> : <Overview />}</aside>
@@ -285,12 +430,22 @@ function OutlinerRow({ p, depth, open, toggle }: { p: Part; depth: number; open:
 
 // ---------------------------------------------------------------- actions
 
-export function duplicateSel() {
-  const { sel, set } = useModel.getState()
+// Duplicate. With repeat (Ctrl+D), like Tinkercad: copy, move or turn the copy, then Ctrl+D again places the
+// next copy with the same step, so rows, stairs and circles take a few key presses.
+export function duplicateSel(repeat = false) {
+  const { sel, set, rep, dupOf } = useModel.getState()
   if (!sel.length) return
-  const add = duplicate(parts(), sel)
-  editParts((ps) => [...ps, ...add])
-  set({ sel: add.filter((a) => !add.some((b) => b.id === a.parent)).map((a) => a.id), mode: 'translate' })
+  const ps = parts()
+  const step = repeat && rep && dupOf.length === sel.length && dupOf.every((id) => sel.includes(id)) ? rep : null
+  const add = duplicate(ps, sel, step ? step.d : [1, 0, 0])
+  const roots = add.filter((a) => !add.some((b) => b.id === a.parent))
+  if (step) for (const r of roots) r.rot = r.rot.map((v, i) => Math.round((v + step.r[i]) * 10) / 10) as Vec3
+  editParts((xs) => [...xs, ...add])
+  const src = ps.find((p) => p.id === sel.at(-1))
+  const ids = roots.map((a) => a.id)
+  // The step is measured from the original, so the first move after a plain duplicate becomes the repeat.
+  set({ sel: ids, mode: 'translate', dupOf: ids, dupBase: src ? { pos: [...src.pos] as Vec3, rot: [...src.rot] as Vec3 } : null, rep: step })
+  if (step) notify('Repeated the last step. Keep pressing Ctrl+D for more.')
 }
 function groupSel() {
   const { sel, set } = useModel.getState()
@@ -329,8 +484,12 @@ function useShortcuts() {
       if (e.code === 'Numpad0' || e.code === 'Numpad5') return (take(), m.set({ view: { v: 'iso', n: m.view.n + 1 } }))
       if (e.code === 'NumpadDecimal' || (!mod && k === 'f')) return (take(), m.set({ frame: m.frame + 1 }))
       if (mod && k === 'g') return (take(), e.shiftKey ? ungroupSel() : groupSel())
+      if (mod && k === 'd') return (take(), duplicateSel(true))
       if (e.shiftKey && k === 'd') return (take(), duplicateSel())
+      if (e.shiftKey && k === 'g') return (take(), selectSimilar())
       if (mod) return
+      if (k === 'end') return (take(), dropSel())
+      if (k === '/' || e.code === 'NumpadDivide') return (take(), toggleIsolate())
       if (k === 'g') return (take(), m.set({ mode: 'translate', axis: null }))
       if (k === 'r') return (take(), m.set({ mode: 'rotate', axis: null }))
       if (k === 's') return (take(), m.set({ mode: 'scale', axis: null }))
@@ -343,10 +502,22 @@ function useShortcuts() {
       if (k === 'escape') m.set({ sel: [], axis: null })
     }
     // Capture phase, so the editor's own keys win over the app-wide shortcuts while this workspace is open.
+    const alt = (e: KeyboardEvent) => (altDown = e.altKey)
+    const off = () => (altDown = false)
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    window.addEventListener('keydown', alt)
+    window.addEventListener('keyup', alt)
+    window.addEventListener('blur', off)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('keydown', alt)
+      window.removeEventListener('keyup', alt)
+      window.removeEventListener('blur', off)
+    }
   }, [])
 }
+// Hold Alt while dragging to move freely without snapping to other parts.
+let altDown = false
 
 // ---------------------------------------------------------------- toolbar
 
@@ -411,7 +582,7 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
         <button className={`${b(false)} disabled:opacity-30`} title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onClick={redo}>
           <Redo2 size={13} />
         </button>
-        <button className={`${b(false)} disabled:opacity-30`} title="Duplicate (Shift+D)" aria-label="Duplicate selection" disabled={!m.sel.length} onClick={duplicateSel}>
+        <button className={`${b(false)} disabled:opacity-30`} title="Duplicate (Shift+D). Ctrl+D repeats your last move or turn on each new copy" aria-label="Duplicate selection" disabled={!m.sel.length} onClick={() => duplicateSel()}>
           <Copy size={13} />
         </button>
         <button className={`${b(false)} disabled:opacity-30 hover:text-err`} title="Delete (Del)" aria-label="Delete selection" disabled={!m.sel.length} onClick={deleteSel}>
@@ -441,6 +612,9 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
         <button className={b(magnet)} title="Snap to grid and 15° steps (M)" onClick={() => setUI({ magnet: !magnet })}>
           <Magnet size={13} />
         </button>
+        <button className={b(m.snapParts)} title="Snap to other parts: edges and centres catch nearby parts and the floor while moving, with guide lines. Hold Alt to move freely" aria-pressed={m.snapParts} onClick={() => m.set({ snapParts: !m.snapParts })}>
+          <Crosshair size={13} />
+        </button>
         <button className={b(m.local)} title="Handles follow the part's own rotation (Local) or the venue (Global)" onClick={() => m.set({ local: !m.local })}>
           {m.local ? 'Local' : 'Global'}
         </button>
@@ -463,6 +637,9 @@ function Toolbar({ root }: { root: React.RefObject<THREE.Group | null> }) {
         </button>
       </div>
       <div className={`${bar} pointer-events-auto`}>
+        <button className={b(!!m.isolate)} title="Show only the selected parts (/)" aria-pressed={!!m.isolate} disabled={!m.isolate && !m.sel.length} onClick={toggleIsolate}>
+          <ScanEye size={13} />
+        </button>
         <button className={b(m.context)} title="Show the stage, truss, screens, set and decor around your parts" onClick={() => m.set({ context: !m.context })}>
           Stage & set
         </button>
@@ -657,6 +834,18 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
   const L = setLine(project)
   const selSet = useMemo(() => new Set(m.sel), [m.sel])
   const all = project.parts ?? []
+  // Isolate: everything outside the chosen parts is hidden for now (not saved, nothing to undo).
+  const shown = useMemo(() => {
+    if (!m.isolate) return project
+    const ps = project.parts ?? []
+    const keep = new Set<string>()
+    for (const id of m.isolate) {
+      keep.add(id)
+      descendants(ps, id).forEach((d) => keep.add(d.id))
+      ancestorsOf(ps, id).forEach((a) => keep.add(a))
+    }
+    return { ...project, parts: ps.map((p) => (keep.has(p.id) || p.hidden ? p : { ...p, hidden: true })) }
+  }, [project, m.isolate])
   const video = !!project.setContent && !project.setContent.startsWith('data:') && all.some((p) => p.mat.led)
   const register = useCallback((id: string, o: THREE.Object3D | null) => {
     const objs = useModel.getState().objs
@@ -691,16 +880,17 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
         </mesh>
       )}
       <Grid userData={{ helper: true }} position={[L.cx, 0.001, L.front]} args={[300, 300]} cellSize={1} sectionSize={5} cellColor={light ? '#d0d0d0' : '#1d1d1d'} sectionColor={light ? '#a8a8a8' : '#353535'} fadeDistance={180} infiniteGrid />
-      {m.context && (
+      {m.context && !m.isolate && (
         <group>
           <Things project={project} pick={() => undefined} />
           <SetItems project={project} show={false} dropAt={0} onInfo={() => undefined} />
         </group>
       )}
       <group ref={root}>
-        <PartsScene project={project} shading={m.shading} onPick={pick} register={register} selected={selSet} shadows={shadows} />
+        <PartsScene project={shown} shading={m.shading} onPick={pick} register={register} selected={selSet} shadows={shadows} />
       </group>
       <Gizmo />
+      <Guides />
       <ViewBridge />
       {m.person && <ScaleFigure x={L.cx + Math.min(6, L.w / 2 + 1.5)} y={L.front + 1.5} z={0} />}
       <SculptSession part={all.find((p) => p.id === m.sel[m.sel.length - 1])} objs={m.objs} />
@@ -762,15 +952,41 @@ function Gizmo() {
   const part = all.find((p) => p.id === active)
   const obj = active ? objs[active] : undefined
   const start = useRef<Map<string, { p: THREE.Vector3; r: THREE.Euler; s: THREE.Vector3 }>>(new Map())
+  const snap0 = useRef<{ w: THREE.Vector3; box: Box; others: Box[] } | null>(null)
   const sculpting = useSculpt((s) => s.on)
   // No move handles while sculpting, or on scattered copies (they always sit on their parent's surface).
   if (!part || !obj || part.locked || !obj.parent || (sculpting && part.kind === 'sculpt') || part.array?.mode === 'surface') return null
   const snapshot = () => {
     start.current = new Map(sel.filter((id) => objs[id]).map((id) => [id, { p: objs[id].position.clone(), r: objs[id].rotation.clone(), s: objs[id].scale.clone() }]))
+    const box = mode === 'translate' && useModel.getState().snapParts ? boxOf(active) : null
+    snap0.current = box ? { w: obj.getWorldPosition(new THREE.Vector3()), box, others: otherBoxes(sel) } : null
+  }
+  // Edges and centres catch nearby parts and the floor; a guide line shows what it lined up with.
+  const snapToOthers = () => {
+    const s0 = snap0.current
+    if (!s0 || altDown || !obj.parent) return useModel.getState().guides.length && useModel.getState().set({ guides: [] })
+    const w = obj.getWorldPosition(new THREE.Vector3())
+    const d = [w.x - s0.w.x, w.z - s0.w.z, w.y - s0.w.y]
+    const box: Box = { min: s0.box.min.map((v, i) => v + d[i]) as Vec3, max: s0.box.max.map((v, i) => v + d[i]) as Vec3 }
+    const dist = view.camera ? view.camera.position.distanceTo(w) : 30
+    const s = snapToParts(box, s0.others, d.map((v) => Math.abs(v) > 1e-5) as [boolean, boolean, boolean], Math.min(0.5, Math.max(0.04, dist * 0.006)))
+    if (s.hits.length) {
+      w.add(new THREE.Vector3(s.move[0], s.move[2], s.move[1]))
+      obj.position.copy(obj.parent.worldToLocal(w))
+    }
+    const c = (b: Box, axis: number, v: number) => {
+      const p = [0, 1, 2].map((i) => (i === axis ? v : (b.min[i] + b.max[i]) / 2))
+      return [p[0], p[2], p[1]] as [number, number, number]
+    }
+    const moved: Box = { min: box.min.map((v, i) => v + s.move[i]) as Vec3, max: box.max.map((v, i) => v + s.move[i]) as Vec3 }
+    const guides = s.hits.filter((h) => h.other).map((h) => [c(moved, h.axis, h.value), c(h.other!, h.axis, h.value)])
+    const was = useModel.getState().guides
+    if (guides.length || was.length) useModel.getState().set({ guides })
   }
   const follow = () => {
     const a = start.current.get(active)
     if (!a) return
+    if (mode === 'translate') snapToOthers()
     const dp = obj.position.clone().sub(a.p)
     const dr = [obj.rotation.x - a.r.x, obj.rotation.y - a.r.y, obj.rotation.z - a.r.z]
     const ds = [obj.scale.x / (a.s.x || 1), obj.scale.y / (a.s.y || 1), obj.scale.z / (a.s.z || 1)]
@@ -786,6 +1002,15 @@ function Gizmo() {
   const commit = () => {
     const ids = [...start.current.keys()]
     const r2 = (n: number, k = 1000) => Math.round(n * k) / k
+    snap0.current = null
+    const ui = useModel.getState()
+    if (ui.guides.length) ui.set({ guides: [] })
+    // Moving or turning a fresh copy teaches Ctrl+D the step to repeat.
+    if (ui.dupBase && ui.dupOf.length === sel.length && ui.dupOf.every((id) => sel.includes(id))) {
+      const pos = fromThree(obj.position)
+      const rot = rotFromThree(obj.rotation)
+      ui.set({ rep: { d: pos.map((v, i) => r2(v - ui.dupBase!.pos[i])) as Vec3, r: rot.map((v, i) => r2(v - ui.dupBase!.rot[i], 10)) as Vec3 } })
+    }
     editParts((ps) =>
       ps.map((p) => {
         if (!ids.includes(p.id) || !objs[p.id]) return p
@@ -857,7 +1082,7 @@ function Props({ p }: { p: Part }) {
         title={sel.length > 1 ? `${sel.length} selected` : isGroup ? 'Group' : PART_KINDS[p.kind as Exclude<PartKind, 'group'>].name}
         right={
           <div className="flex gap-1">
-            <IconBtn title="Duplicate (Shift+D)" onClick={duplicateSel}>
+            <IconBtn title="Duplicate (Shift+D)" onClick={() => duplicateSel()}>
               <Copy size={13} />
             </IconBtn>
             <IconBtn title="Group selected (Ctrl+G)" onClick={groupSel}>
@@ -885,6 +1110,8 @@ function Props({ p }: { p: Part }) {
           </button>
         )}
       </Section>
+
+      <ArrangePanel />
 
       <Section title="Transform">
         <Vec label="Location" unit="m" v={p.pos} step={0.25} onChange={(i, n) => v3('pos', i, n)} />
@@ -1454,5 +1681,120 @@ function Text3dToggle({ p }: { p: Part }) {
       {p.solid && st === 'failed' && <p className="text-[10px] text-warn">The 3D font could not load (offline?). The sign shows flat for now.</p>}
       {p.solid && <Num label="Rounded edges" value={p.bevel ?? 0} onChange={(bevel) => updatePart(p.id, { bevel: Math.max(0, Math.min(1, bevel)) })} step={1} int tip="0 = sharp, 1 = rounded letter edges." />}
     </div>
+  )
+}
+
+// Snap guide lines drawn while dragging (hidden in renders).
+function Guides() {
+  const g = useModel((s) => s.guides)
+  const geo = useMemo(() => {
+    const b = new THREE.BufferGeometry()
+    b.setAttribute('position', new THREE.Float32BufferAttribute(g.flat(2), 3))
+    return b
+  }, [g])
+  useEffect(() => () => geo.dispose(), [geo])
+  if (!g.length) return null
+  return (
+    <lineSegments geometry={geo} userData={{ helper: true }} renderOrder={999}>
+      <lineBasicMaterial color="#ff3df0" depthTest={false} transparent />
+    </lineSegments>
+  )
+}
+
+const ALIGN: { axis: Axis3; name: string; edges: [Edge, string][] }[] = [
+  { axis: 0, name: 'Across', edges: [['min', 'Left'], ['mid', 'Centre'], ['max', 'Right']] },
+  { axis: 1, name: 'Depth', edges: [['min', 'Back'], ['mid', 'Middle'], ['max', 'Front']] },
+  { axis: 2, name: 'Height', edges: [['min', 'Bottom'], ['mid', 'Middle'], ['max', 'Top']] },
+]
+const m2 = (n: number) => `${fmt(Math.abs(n) < 0.005 ? 0 : n, 2)}`
+
+// Align, spread, drop, stack, match size and measure: the everyday helpers for putting parts together.
+function ArrangePanel() {
+  const sel = useModel((s) => s.sel)
+  const objs = useModel((s) => s.objs)
+  const all = useStore((s) => s.project.parts ?? NO_PARTS)
+  const [toSel, setToSel] = useState(false)
+  const [gap, setGap] = useState(0.5)
+  const [m, setM] = useState<{ a: Box | null; b: Box | null }>({ a: null, b: null })
+  const many = sel.length > 1
+  // Measured after the 3D view has caught up with the latest edit.
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setM({ a: boxOf(sel.at(-1)), b: sel.length > 1 ? boxOf(sel.at(-2)) : null }))
+    return () => cancelAnimationFrame(r)
+  }, [sel, objs, all])
+  const g = m.a && m.b ? gapBetween(m.b, m.a) : null
+  const prev = all.find((p) => p.id === sel.at(-2))
+  const btn = 'btn justify-center px-1 text-[11px] disabled:opacity-30'
+  return (
+    <Section title="Arrange">
+      {m.a && (
+        <p className="text-[11px] text-mute">
+          Size on stage: <span className="text-ink tabular-nums">{sizeOf(m.a).map(m2).join(' × ')} m</span>
+          {g && (
+            <>
+              <br />
+              Gap to {prev?.name ?? 'the other part'}: <span className="text-ink tabular-nums">{g.gap.map((v, i) => `${['across', 'depth', 'up'][i]} ${v < -0.005 ? `overlaps ${m2(-v)}` : m2(Math.max(0, v))}`).join(' · ')} m</span>
+            </>
+          )}
+        </p>
+      )}
+      {many ? (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="label">Line up</span>
+            <div className="flex gap-0.5 text-[11px]">
+              <button className={`btn h-6 px-2 text-[11px] ${!toSel ? 'btn-on' : ''}`} title="Others move to the last part you picked" onClick={() => setToSel(false)}>
+                to last picked
+              </button>
+              <button className={`btn h-6 px-2 text-[11px] ${toSel ? 'btn-on' : ''}`} title="Line up within the box around the whole selection" onClick={() => setToSel(true)}>
+                to selection
+              </button>
+            </div>
+          </div>
+          {ALIGN.map((r) => (
+            <div key={r.axis} className="grid grid-cols-[52px_1fr_1fr_1fr] gap-1 items-center">
+              <span className="text-[11px] text-mute">{r.name}</span>
+              {r.edges.map(([e, label]) => (
+                <button key={e} className={btn} title={`Line up ${label.toLowerCase()} ${r.name === 'Height' ? 'edges' : 'sides'} ${AXIS_NAME[r.axis]}`} onClick={() => alignSel(r.axis, e, toSel)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          ))}
+          <div className="grid grid-cols-[52px_1fr_1fr_1fr] gap-1 items-center">
+            <span className="text-[11px] text-mute">Space evenly</span>
+            {([0, 1, 2] as Axis3[]).map((a) => (
+              <button key={a} className={btn} disabled={sel.length < 3} title={`Keep the outer two in place and make the gaps ${AXIS_NAME[a]} equal (3 or more parts)`} onClick={() => distributeSel(a)}>
+                {['Across', 'Depth', 'Up'][a]}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-[52px_1fr_1fr_1fr] gap-1 items-end">
+            <Num label="Gap" unit="m" step={0.1} min={0} value={gap} onChange={setGap} />
+            {([0, 1, 2] as Axis3[]).map((a) => (
+              <button key={a} className={btn} title={`Put them in a row ${AXIS_NAME[a]}, exactly ${gap} m apart`} onClick={() => distributeSel(a, gap)}>
+                {['Row', 'Line', 'Pile'][a]}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-[11px] text-mute">Shift-click more parts to line them up, space them evenly or stack them. The last one you pick is the one the others follow.</p>
+      )}
+      <div className="grid grid-cols-2 gap-1">
+        <button className={btn} title="Drop onto whatever is below: another part or the floor (End)" onClick={dropSel}>
+          <ArrowDownToLine size={12} /> Drop down
+        </button>
+        <button className={btn} disabled={!many} title="Stack the others, centred, on top of the last part you picked" onClick={stackSel}>
+          Stack on top
+        </button>
+        <button className={btn} disabled={!many} title="Make the others the same size as the last part you picked (best on parts that aren't turned)" onClick={() => matchSel([true, true, true])}>
+          Match size
+        </button>
+        <button className={btn} title="Select every part of the same kind and colour (Shift+G)" onClick={selectSimilar}>
+          Select similar
+        </button>
+      </div>
+    </Section>
   )
 }

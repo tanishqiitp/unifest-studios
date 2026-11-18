@@ -10,6 +10,7 @@ const GUIDES: Partial<Record<Workspace, { title: string; steps: string[]; next?:
     title: 'Model in 3D',
     steps: [
       'Add a shape or a ready-made piece (left). Click it, then drag the arrows: G moves, R rotates, S scales, X/Y/Z locks an axis.',
+      'Put parts together with Arrange (right): line up, space evenly, drop onto what is below, stack. Moving snaps to nearby parts (hold Alt to move freely); Ctrl+D repeats your last move on each new copy.',
       'Shape it in the panel on the right: taper, twist, bend, cage deform, cut-outs, or Sculpt clay with brushes (turn on Sculpt mode).',
       'Curves make tubes, ribbons and curved walls; repeat parts along a curve or scatter flowers over any surface.',
       'Save camera views, render a high-quality still, and export a .glb for Blender any time.',
