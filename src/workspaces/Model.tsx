@@ -7,6 +7,8 @@ import { useGlCreated } from '../components/Safe3D'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
+import { guessMetres, rememberMesh, toUnit } from '../lib/meshImport'
 import { GizmoHelper, GizmoViewport, Grid, OrbitControls, PerformanceMonitor, TransformControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { create } from 'zustand'
@@ -81,7 +83,8 @@ interface ModelUI {
   dupOf: string[] // the copies made by the last duplicate
   dupBase: { pos: Vec3; rot: Vec3 } | null // where the copied part was, to learn the repeat step
   rep: { d: Vec3; r: Vec3 } | null // Ctrl+D: the move and turn to repeat on the next copy
-  tool: 'ruler' | 'place' | null // click tools in the 3D view
+  tool: 'ruler' | 'place' | 'draw' | null // click tools in the 3D view
+  drawKind: PartKind | null // the shape to draw on the floor
   ruler: [number, number, number][] // measured points, three.js coordinates
   clip: { pos: Vec3; rot: Vec3; scl: Vec3 } | null // copied placement (position on stage)
   objs: Record<string, THREE.Object3D>
@@ -104,6 +107,7 @@ export const useModel = create<ModelUI>((set) => ({
   dupBase: null,
   rep: null,
   tool: null,
+  drawKind: null,
   ruler: [],
   clip: null,
   objs: {},
@@ -312,20 +316,44 @@ export function ModelWorkspace() {
 
 function AddPanel() {
   const kinds = Object.keys(PART_KINDS) as Exclude<PartKind, 'group'>[]
+  const drawing = useModel((s) => (s.tool === 'draw' ? s.drawKind : null))
+  const importRef = useRef<HTMLInputElement>(null)
   return (
     <>
+      <input
+        ref={importRef}
+        type="file"
+        accept=".stl,.obj,.glb,.gltf,.fbx"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) importMesh(f)
+          e.target.value = ''
+        }}
+      />
       <Section title="Add">
         {(['Basic', 'Stage', 'Advanced'] as const).map((g) => (
           <div key={g}>
             <div className="text-[10px] uppercase tracking-wider text-mute mb-1">{g}</div>
             <div className="grid grid-cols-3 gap-1 mb-2">
               {kinds
-                .filter((k) => PART_KINDS[k].group === g)
+                .filter((k) => PART_KINDS[k].group === g && k !== 'mesh')
                 .map((k) => (
-                  <button key={k} className="rounded-lg border border-line px-1.5 py-2 text-[11px] hover:border-line-hi hover:bg-raised" title={PART_KINDS[k].tip} onClick={() => addPart(k)}>
+                  <button
+                    key={k}
+                    className={`rounded-lg border px-1.5 py-2 text-[11px] hover:border-line-hi hover:bg-raised ${drawing === k ? 'border-fg bg-raised' : 'border-line'}`}
+                    title={`${PART_KINDS[k].tip} Drag on the floor to draw it at any size, click once for the standard size, or double-click here to add it at the stage front.`}
+                    onClick={() => startDraw(k)}
+                    onDoubleClick={() => (useModel.getState().set({ tool: null, drawKind: null }), addPart(k))}
+                  >
                     {PART_KINDS[k].name}
                   </button>
                 ))}
+              {g === 'Advanced' && (
+                <button className="rounded-lg border border-dashed border-line px-1.5 py-2 text-[11px] hover:border-line-hi hover:bg-raised" title="Bring in your own STL, OBJ, GLB or FBX file (3D printing, CAD, Blender). It stays in this browser." onClick={() => importRef.current?.click()}>
+                  Import STL / 3D
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -915,6 +943,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
       <Gizmo />
       <Guides />
       <PointerTools />
+      <SizeBox />
       <RulerMarks />
       <ViewBridge />
       {m.person && <ScaleFigure x={L.cx + Math.min(6, L.w / 2 + 1.5)} y={L.front + 1.5} z={0} />}
@@ -1193,6 +1222,20 @@ function Props({ p }: { p: Part }) {
               <Num label="Swags" value={p.swags ?? 0} onChange={(swags) => up({ swags: Math.round(Math.max(0, Math.min(20, swags))) })} step={1} int tip="Scallops along the top: 0 is a straight curtain." />
               <Num label="Swag dip" value={Math.round((p.sag ?? 0.25) * 100)} onChange={(sg) => up({ sag: Math.max(0, Math.min(90, sg)) / 100 })} unit="%" step={5} />
             </div>
+          )}
+          {p.kind === 'geodome' && <Num label="Detail" value={p.steps ?? 2} onChange={(steps) => up({ steps: Math.round(Math.max(1, Math.min(4, steps))) })} step={1} int tip="1 = few big triangles, 4 = many small ones." />}
+          {p.kind === 'truss' && <Num label="Bays" value={p.steps ?? 6} onChange={(steps) => up({ steps: Math.round(Math.max(1, Math.min(60, steps))) })} step={1} int tip="Sections along the length, each with cross bracing." />}
+          {p.kind === 'helix' && <Num label="Turns" value={p.steps ?? 3} onChange={(steps) => up({ steps: Math.max(0.25, Math.min(30, steps)) })} step={0.5} />}
+          {p.kind === 'tree' && <Num label="Tiers" value={p.steps ?? 3} onChange={(steps) => up({ steps: Math.round(Math.max(1, Math.min(8, steps))) })} step={1} int />}
+          {p.kind === 'tree' && <Num label="Sides" value={p.seg ?? 7} onChange={(seg) => up({ seg: Math.round(Math.max(3, Math.min(32, seg))) })} step={1} int tip="Low numbers look faceted and stylised." />}
+          {(p.kind === 'geodome' || p.kind === 'truss' || p.kind === 'helix') && <Num label={p.kind === 'helix' ? 'Tube radius' : 'Strut radius'} value={p.thick ?? 0.04} onChange={(thick) => up({ thick: Math.max(0.005, thick) })} unit="m" step={0.01} />}
+          {p.kind === 'mesh' && (
+            <>
+              <p className="text-[11px] text-mute">Your imported file. Drag the box handles or type a size to resize it. The file stays in this browser; on another computer, import it again.</p>
+              <button className="btn w-full justify-center text-[11px]" title="For files that came in lying down (made with Z as up)" onClick={() => up({ zUp: !p.zUp, w: p.w, h: p.d, d: p.h })}>
+                Stand it up / lay it down
+              </button>
+            </>
           )}
           {p.kind === 'stairs' && <Num label="Steps" value={p.steps ?? 6} onChange={(steps) => up({ steps: Math.round(Math.max(1, Math.min(60, steps))) })} step={1} int />}
           {(p.kind === 'torus' || p.kind === 'dome') && <Num label="Sweep" value={p.arc ?? (p.kind === 'dome' ? 180 : 360)} onChange={(arc) => up({ arc: Math.max(1, Math.min(p.kind === 'dome' ? 180 : 360, arc)) })} unit="°" step={15} tip="Less than full makes an arch or partial dome." />}
@@ -1885,7 +1928,11 @@ function PointerTools() {
   const tool = useModel((s) => s.tool)
   const { gl, camera, scene } = useThree()
   useEffect(() => {
-    if (!tool) return
+    if (tool !== 'draw') return
+    return drawTool(gl.domElement, camera, scene)
+  }, [tool, gl, camera, scene])
+  useEffect(() => {
+    if (!tool || tool === 'draw') return
     const el = gl.domElement
     el.style.cursor = 'crosshair'
     let down: { x: number; y: number } | null = null
@@ -1986,9 +2033,12 @@ function RulerMarks() {
 function ToolHint() {
   const tool = useModel((s) => s.tool)
   const n = useModel((s) => s.ruler.length)
+  const kind = useModel((s) => s.drawKind)
   if (!tool) return null
   const text =
-    tool === 'ruler'
+    tool === 'draw'
+      ? `Drag on the floor to draw the ${kind ? PART_KINDS[kind as Exclude<PartKind, 'group'>]?.name.toLowerCase() : 'shape'}, or click once for the standard size. Shift keeps it square.`
+      : tool === 'ruler'
       ? n === 1
         ? 'Click the second point. Corners and edges snap; hold Alt for anywhere.'
         : 'Ruler: click two points to measure. Corners and edges snap; hold Alt for anywhere.'
@@ -1996,8 +2046,8 @@ function ToolHint() {
   return (
     <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-10 glass rounded-xl px-3 py-1.5 text-[11px] flex items-center gap-2 max-w-[90%]">
       <span>{text}</span>
-      <button className="btn h-6 px-2 text-[11px]" onClick={() => useModel.getState().set({ tool: null, ruler: [] })}>
-        Done (Esc)
+      <button className="btn h-6 px-2 text-[11px]" onClick={() => useModel.getState().set({ tool: null, ruler: [], drawKind: null })}>
+        {tool === 'draw' ? 'Cancel (Esc)' : 'Done (Esc)'}
       </button>
     </div>
   )
@@ -2099,4 +2149,251 @@ function FloatingCheck() {
       </div>
     </div>
   )
+}
+
+// ---------------------------------------------------------------- draw on the floor and resize with handles
+
+function startDraw(kind: PartKind) {
+  const m = useModel.getState()
+  if (m.tool === 'draw' && m.drawKind === kind) return m.set({ tool: null, drawKind: null })
+  m.set({ tool: 'draw', drawKind: kind, ruler: [] })
+}
+
+// Long thin things (signs, drapes, beams) follow the drag as a line; everything else fills the dragged rectangle.
+const LINEAR = new Set<PartKind>(['text', 'drape', 'truss', 'extrude', 'stairs', 'ramp'])
+
+/** Drag on the floor (or on top of a part) to draw the chosen shape; a click places it at its standard size. */
+function drawTool(el: HTMLElement, camera: THREE.Camera, scene: THREE.Scene) {
+  el.style.cursor = 'crosshair'
+  let draft: { id: string; a: THREE.Vector3; y0: number; def: Vec3; moved: boolean } | null = null
+  let frame = 0
+  const planeHit = (e: PointerEvent, y: number) => {
+    const r = el.getBoundingClientRect()
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera)
+    return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), new THREE.Vector3())
+  }
+  const snap = (v: number) => (useStore.getState().ui.magnet ? Math.round(v * 4) / 4 : Math.round(v * 100) / 100)
+  const down = (e: PointerEvent) => {
+    if (e.button !== 0) return
+    const kind = useModel.getState().drawKind
+    if (!kind || kind === 'group') return
+    // Keep the view from orbiting and the click from selecting while drawing.
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    const hit = pointAt(e, el, camera, scene)
+    const onTop = hit && hit.object && hit.normal.y > 0.7
+    const y0 = onTop ? hit!.point.y : 0
+    const a = onTop ? hit!.point.clone() : planeHit(e, 0)
+    if (!a) return
+    a.x = snap(a.x)
+    a.z = snap(a.z)
+    const k = PART_KINDS[kind as Exclude<PartKind, 'group'>]
+    const n = newPart(kind, [a.x, a.z, +y0.toFixed(3)])
+    editParts((ps) => [...ps, n])
+    useModel.getState().set({ sel: [n.id] })
+    draft = { id: n.id, a, y0, def: k.size, moved: false }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up, { once: true })
+  }
+  const move = (e: PointerEvent) => {
+    if (!draft) return
+    const d0 = draft
+    const b = planeHit(e, d0.y0)
+    if (!b) return
+    cancelAnimationFrame(frame)
+    frame = requestAnimationFrame(() => {
+      const dx = snap(b.x - d0.a.x)
+      const dz = snap(b.z - d0.a.z)
+      if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) return
+      d0.moved = true
+      const [dw, dd, dh] = d0.def
+      const kind = useModel.getState().drawKind!
+      let patch: Partial<Part>
+      if (LINEAR.has(kind)) {
+        const len = Math.max(0.1, Math.hypot(dx, dz))
+        patch = { w: +len.toFixed(2), h: +(dh * (kind === 'truss' || kind === 'text' ? 1 : len / dw)).toFixed(2), pos: [d0.a.x + dx / 2, d0.a.z + dz / 2, +d0.y0.toFixed(3)], rot: [0, 0, +THREE.MathUtils.radToDeg(Math.atan2(-dz, dx)).toFixed(1)] }
+      } else {
+        let w = Math.max(0.05, Math.abs(dx))
+        let d = Math.max(0.05, Math.abs(dz))
+        if (e.shiftKey) w = d = Math.max(w, d)
+        const sx = Math.sign(dx) || 1
+        const sz = Math.sign(dz) || 1
+        const h = kind === 'plane' ? dh : dh * Math.sqrt((w / dw) * (d / dd))
+        patch = { w: +w.toFixed(2), d: +d.toFixed(2), h: +h.toFixed(2), pos: [d0.a.x + (sx * w) / 2, d0.a.z + (sz * d) / 2, +d0.y0.toFixed(3)] }
+      }
+      editParts((ps) => ps.map((p) => (p.id === d0.id ? { ...p, ...patch } : p)))
+    })
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    const d0 = draft
+    draft = null
+    if (!d0) return
+    const name = PART_KINDS[useModel.getState().drawKind as Exclude<PartKind, 'group'>]?.name ?? 'Shape'
+    useModel.getState().set({ tool: null, drawKind: null, sel: [d0.id], mode: 'translate' })
+    notify(d0.moved ? `Drew a ${name.toLowerCase()}. Drag the box handles to resize it.` : `Added a ${name.toLowerCase()} at the standard size`)
+  }
+  el.addEventListener('pointerdown', down, true)
+  return () => {
+    el.style.cursor = ''
+    el.removeEventListener('pointerdown', down, true)
+    window.removeEventListener('pointermove', move)
+    cancelAnimationFrame(frame)
+  }
+}
+
+type Handle = { x: -1 | 0 | 1; y: 0 | 0.5 | 1; z: -1 | 0 | 1; corner: boolean }
+const HANDLES: Handle[] = [
+  { x: 1, y: 0.5, z: 0, corner: false },
+  { x: -1, y: 0.5, z: 0, corner: false },
+  { x: 0, y: 0.5, z: 1, corner: false },
+  { x: 0, y: 0.5, z: -1, corner: false },
+  { x: 0, y: 1, z: 0, corner: false },
+  ...([-1, 1] as const).flatMap((x) => ([-1, 1] as const).flatMap((z) => ([0, 1] as const).map((y) => ({ x, y, z, corner: true })))),
+]
+
+/**
+ * The selected part's size box: drag a side to stretch one way (the opposite side stays put), the top to make
+ * it taller, a corner to grow or shrink it evenly. The size shows next to it. Snaps to 5 cm with the magnet on.
+ */
+function SizeBox() {
+  const sel = useModel((s) => s.sel)
+  const objs = useModel((s) => s.objs)
+  const tool = useModel((s) => s.tool)
+  const sculpting = useSculpt((s) => s.on)
+  const all = useStore((s) => s.project.parts ?? NO_PARTS)
+  const { camera, gl, invalidate } = useThree()
+  const grp = useRef<THREE.Group>(null)
+  const knobs = useRef<THREE.Group>(null)
+  const p = sel.length === 1 ? all.find((x) => x.id === sel[0]) : undefined
+  const obj = p ? objs[p.id] : undefined
+  const W = p ? p.w * Math.abs(p.scl[0]) : 1
+  const D = p ? p.d * Math.abs(p.scl[1]) : 1
+  const H = p ? p.h * Math.abs(p.scl[2]) : 1
+  const edges = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(W, H, D).translate(0, H / 2, 0)), [W, H, D])
+  useEffect(() => () => edges.dispose(), [edges])
+  const tmp = useMemo(() => ({ v: new THREE.Vector3(), q: new THREE.Quaternion(), s: new THREE.Vector3() }), [])
+  // Follow the part every frame (also while the move handles drag it) and keep the knobs a steady size on screen.
+  useFrame(() => {
+    if (!grp.current || !obj?.parent) return
+    obj.updateWorldMatrix(true, false)
+    obj.matrixWorld.decompose(tmp.v, tmp.q, tmp.s)
+    grp.current.position.copy(tmp.v)
+    grp.current.quaternion.copy(tmp.q)
+    const k = camera.position.distanceTo(tmp.v) * 0.011
+    knobs.current?.children.forEach((c) => c.scale.setScalar(k))
+  })
+  const show = p && obj?.parent && p.kind !== 'group' && p.kind !== 'path' && !p.locked && !tool && !(sculpting && p.kind === 'sculpt') && p.array?.mode !== 'surface'
+  if (!show) return null
+  const controls = () => view.controls as unknown as { enabled: boolean } | undefined
+  const start = (h: Handle) => (e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation()
+    const c = controls()
+    if (c) c.enabled = false
+    obj!.updateWorldMatrix(true, false)
+    const O = obj!.getWorldPosition(new THREE.Vector3())
+    const q = obj!.getWorldQuaternion(new THREE.Quaternion())
+    const hl = new THREE.Vector3((h.x * W) / 2, h.y * H, (h.z * D) / 2)
+    const opp = new THREE.Vector3((-h.x * W) / 2, (1 - h.y) * H, (-h.z * D) / 2)
+    const dirL = h.corner ? hl.clone().sub(opp) : new THREE.Vector3(h.x, h.y === 1 ? 1 : 0, h.z)
+    const len = dirL.length()
+    const u = dirL.clone().applyQuaternion(q).normalize()
+    const P0 = hl.clone().applyQuaternion(q).add(O)
+    const part = p!
+    const magnet = useStore.getState().ui.magnet
+    let raf = 0
+    const r2 = (n: number) => Math.round(n * 1000) / 1000
+    const move = (ev: PointerEvent) => {
+      const rect = gl.domElement.getBoundingClientRect()
+      ray.setFromCamera(new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1), camera)
+      const v = ray.ray.direction
+      const w0 = P0.clone().sub(ray.ray.origin)
+      const b = u.dot(v)
+      if (Math.abs(1 - b * b) < 1e-6) return
+      let t = (b * v.dot(w0) - u.dot(w0)) / (1 - b * b)
+      let nW = W
+      let nH = H
+      let nD = D
+      const shift = new THREE.Vector3()
+      if (h.corner) {
+        const f = Math.max(0.05, (len + t) / len)
+        ;[nW, nH, nD] = [W * f, H * f, D * f]
+        const far = opp.clone().add(hl.clone().sub(opp).multiplyScalar(f))
+        shift.set((opp.x + far.x) / 2, Math.min(opp.y, far.y), (opp.z + far.z) / 2)
+      } else {
+        const size = h.x ? W : h.z ? D : H
+        let n = Math.max(0.02, size + t)
+        if (magnet) n = Math.max(0.05, Math.round(n * 20) / 20)
+        t = n - size
+        if (h.x) (nW = n), shift.set((h.x * t) / 2, 0, 0)
+        else if (h.z) (nD = n), shift.set(0, 0, (h.z * t) / 2)
+        else nH = n
+      }
+      const world = shift.applyQuaternion(q).add(O)
+      const pos = fromThree(obj!.parent!.worldToLocal(world)).map(r2) as Vec3
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() =>
+        editParts((ps) => ps.map((x) => (x.id === part.id ? { ...x, pos, w: r2(nW / Math.abs(part.scl[0] || 1)), d: r2(nD / Math.abs(part.scl[1] || 1)), h: r2(nH / Math.abs(part.scl[2] || 1)) } : x))),
+      )
+    }
+    const end = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      const c2 = controls()
+      if (c2) c2.enabled = true
+      document.body.style.cursor = ''
+      invalidate()
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+  }
+  return (
+    <group ref={grp} userData={{ helper: true }}>
+      <lineSegments geometry={edges} renderOrder={998}>
+        <lineBasicMaterial color="#9aa0aa" depthTest={false} transparent opacity={0.7} />
+      </lineSegments>
+      <group ref={knobs}>
+        {HANDLES.map((h, i) => (
+          <mesh
+            key={i}
+            position={[(h.x * W) / 2, h.y * H, (h.z * D) / 2]}
+            renderOrder={999}
+            onPointerDown={start(h)}
+            onPointerOver={(e) => (e.stopPropagation(), (document.body.style.cursor = h.corner ? 'nwse-resize' : 'ew-resize'))}
+            onPointerOut={() => (document.body.style.cursor = '')}
+          >
+            <boxGeometry args={h.corner ? [0.9, 0.9, 0.9] : [0.7, 0.7, 0.7]} />
+            <meshBasicMaterial color={h.corner ? '#e6e6e6' : '#7c8594'} depthTest={false} transparent />
+          </mesh>
+        ))}
+      </group>
+      <Html position={[W / 2, 0, D / 2]} style={{ pointerEvents: 'none' }}>
+        <div className="glass rounded-md px-1.5 py-0.5 text-[10px] whitespace-nowrap tabular-nums translate-x-2 translate-y-1">
+          {fmt(W, 2)} × {fmt(D, 2)} × {fmt(H, 2)} m
+        </div>
+      </Html>
+    </group>
+  )
+}
+
+/** Import an STL, OBJ, GLB or FBX file as a part (stored in this browser like Decor's imported models). */
+async function importMesh(f: File) {
+  try {
+    notify(`Importing ${f.name}…`)
+    const { saveModel } = await import('../lib/models')
+    const m = await saveModel(f)
+    const { loadModel } = await import('./Decor3D')
+    const zUp = /\.stl$/i.test(f.name)
+    const u = toUnit(await loadModel(m.id), zUp)
+    rememberMesh(m.id, zUp, u.geo)
+    const g = guessMetres(u.size)
+    const L = setLine(useStore.getState().project)
+    const r = (n: number) => Math.max(0.01, +(n * g.scale).toFixed(3))
+    const n = newPart('mesh', [L.cx, L.front + 2, 0], { name: f.name.replace(/\.[^.]+$/, '').slice(0, 40) || 'Imported', modelId: m.id, zUp, w: r(u.size.x), d: r(u.size.z), h: r(u.size.y) })
+    editParts((ps) => [...ps, n])
+    useModel.getState().set({ sel: [n.id], frame: useModel.getState().frame + 1 })
+    notify(`Imported ${Math.round(u.triangles).toLocaleString('en-IN')} triangles, read as ${g.unit}. Drag the box handles to resize.${u.triangles > 400_000 ? ' It is heavy: it may slow older laptops.' : ''}`)
+  } catch (e) {
+    notify((e as Error).message || 'Could not import that file')
+  }
 }

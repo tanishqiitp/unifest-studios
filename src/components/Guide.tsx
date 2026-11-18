@@ -9,6 +9,7 @@ const GUIDES: Partial<Record<Workspace, { title: string; steps: string[]; next?:
   model: {
     title: 'Model in 3D',
     steps: [
+      'Pick a shape on the left, then drag on the floor to draw it at any size. Drag the box handles to resize: sides stretch one way, corners grow it evenly. Import STL / 3D brings in your own files.',
       'Add a shape or a ready-made piece (left). Click it, then drag the arrows: G moves, R rotates, S scales, X/Y/Z locks an axis.',
       'Put parts together with Arrange (right): line up, space evenly, drop onto what is below, stack. Moving snaps to nearby parts (hold Alt to move freely); Ctrl+D repeats your last move on each new copy.',
       'Ruler (Shift+R) measures between corners; P places the selected part on any face you click; tick Hole on a part to cut it out of the others in its group.',

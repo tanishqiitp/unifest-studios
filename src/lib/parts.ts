@@ -20,6 +20,11 @@ export const PART_KINDS: Record<Exclude<PartKind, 'group'>, { name: string; size
   extrude: { name: 'Extrude shape', size: [4, 0.4, 4], group: 'Advanced', tip: 'Draw any outline and push it into a solid: stars, arches, logos, cut panels.' },
   drape: { name: 'Drape / swag', size: [6, 0.4, 4], group: 'Stage', tip: 'Fabric with pleats and optional swags along the top: stage curtains, backdrops, mandap and ceiling drapes.' },
   path: { name: 'Curve', size: [8, 3, 4], group: 'Advanced', tip: 'A smooth line through points you place: tubes, neon lines, flowing ribbons, curved walls, or a guide to repeat parts along.' },
+  geodome: { name: 'Geodesic dome', size: [8, 8, 4], group: 'Advanced', tip: 'A frame of struts and joints: glamping domes, light domes, sculptures. Set the detail and strut thickness.' },
+  truss: { name: 'Space frame', size: [6, 0.4, 0.4], group: 'Advanced', tip: 'A box truss beam with cross bracing: overhead rigs, gantries, frames. Set the bays and tube size.' },
+  helix: { name: 'Spiral', size: [2, 2, 4], group: 'Advanced', tip: 'A coil rising upward: spiral light tubes, twisting sculptures, springs. Set the turns.' },
+  tree: { name: 'Tree', size: [3, 3, 5], group: 'Advanced', tip: 'Low-poly tree: trunk and stacked tiers. Add Organic or Taper for variety; scatter or array for a forest.' },
+  mesh: { name: 'Imported 3D', size: [1, 1, 1], group: 'Advanced', tip: 'Your own STL, OBJ or GLB file, resized like any shape.' },
   sculpt: { name: 'Sculpt clay', size: [3, 3, 3], group: 'Advanced', tip: 'Shape it with brushes like clay: draw, inflate, smooth, grab, flatten, pinch. Select it and turn on Sculpt mode.' },
 }
 
@@ -88,6 +93,10 @@ export function newPart(kind: PartKind, pos: Vec3, extra: Partial<Part> = {}): P
     text: kind === 'text' ? 'UNIFEST' : undefined,
     mat: kind === 'text' ? { color: '#ffffff', metal: 0, rough: 0.5, glow: 1.5 } : { color: '#d9d9d9', metal: 0, rough: 0.6 },
     ...(kind === 'drape' ? { steps: 14, swags: 0, sag: 0.25, mat: MAT_PRESETS.Velvet } : {}),
+    ...(kind === 'geodome' ? { steps: 2, thick: 0.04, mat: MAT_PRESETS.Chrome } : {}),
+    ...(kind === 'truss' ? { steps: 6, thick: 0.025, mat: MAT_PRESETS['Brushed steel'] } : {}),
+    ...(kind === 'helix' ? { steps: 3, thick: 0.05, mat: MAT_PRESETS['Neon glow'] } : {}),
+    ...(kind === 'tree' ? { steps: 3, seg: 7, mat: { color: '#2f6b3a', metal: 0, rough: 0.85 } } : {}),
     ...(kind === 'path' ? { profile: CURVE_PRESETS.Arch, plane: 'front' as const, form: 'tube' as const, thick: 0.12 } : {}),
     ...extra,
   }

@@ -7,6 +7,8 @@ import { alongCurve, curveGeometry } from '../lib/curves'
 import { cutoutPaths } from '../lib/cutouts'
 import { decodeSculpt, sculptBase } from '../lib/sculpt'
 import { instances } from '../lib/partArrays'
+import { geodomeGeometry, helixGeometry, treeGeometry, trussGeometry } from '../lib/frames'
+import { meshVersion, subscribeMesh, unitMesh } from '../lib/meshImport'
 import { csgReady, cutGeometry, requestCsg, subscribeCsg } from '../lib/csg'
 import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
@@ -246,6 +248,19 @@ function baseGeometry(p: Part, need: { taper: boolean; organic: boolean; bend: b
       if ((p.profile ?? []).length < 3) return null
       return cutPanel(p, p.profile!, Math.max(0, p.bevel ?? 0))
     }
+    case 'geodome':
+      return geodomeGeometry(p)
+    case 'truss':
+      return trussGeometry(p)
+    case 'helix':
+      return helixGeometry(p)
+    case 'tree':
+      return treeGeometry(p)
+    case 'mesh': {
+      // The imported file once it has loaded; a plain box stands in until then (or if the file isn't here).
+      const u = unitMesh(p.modelId, p.zUp)
+      return u ? u.clone().scale(w, h, d) : new THREE.BoxGeometry(w, h, d).translate(0, h / 2, 0)
+    }
     case 'sculpt':
       return sculptGeometry(p)
     case 'path':
@@ -373,7 +388,7 @@ export function PartsScene({
 
 // The fields that decide a part's shape (not its place, colour or name), for rebuilding only when needed.
 function geoKey(p: Part) {
-  return JSON.stringify([p.kind, p.w, p.h, p.d, p.seg, p.bevel, p.steps, p.arc, p.thick, p.profile, p.text, p.taper, p.twist, p.bend, p.organic, p.seed, p.base, p.res, p.holes, p.plane, p.closed, p.form, p.swags, p.sag, p.cage, p.solid, p.array?.mode === 'surface'])
+  return JSON.stringify([p.kind, p.w, p.h, p.d, p.seg, p.bevel, p.steps, p.arc, p.thick, p.profile, p.text, p.taper, p.twist, p.bend, p.organic, p.seed, p.base, p.res, p.holes, p.plane, p.closed, p.form, p.swags, p.sag, p.cage, p.solid, p.modelId, p.zUp, p.array?.mode === 'surface'])
 }
 
 // Copies of a part: its own array, or along its parent curve.
@@ -386,12 +401,13 @@ function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean
   const ctx = useContext(PartsCtx)!
   // 3D letters: ask for the font, and rebuild once it has arrived.
   const fontReady = useSyncExternalStore(subscribeFont, fontState)
+  const meshReady = useSyncExternalStore(subscribeMesh, meshVersion)
   useEffect(() => void (p.kind === 'text' && p.solid && requestFont()), [p.kind, p.solid])
   // Scattered copies are small and many: build them with fewer sides (detail they would not show anyway),
   // so hundreds of flowers stay light on ordinary laptops.
   // Rebuilt only when the shape itself changes (not on moves, renames, colour or other parts' edits).
   const gk = geoKey(p)
-  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [gk, p.sculpt, fontReady]) // eslint-disable-line react-hooks/exhaustive-deps
+  const geo = useMemo(() => partGeometry(p.array?.mode === 'surface' ? { ...p, seg: Math.min(p.seg ?? 32, 10) } : p), [gk, p.sculpt, fontReady, p.kind === 'mesh' ? meshReady : 0]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => geo?.dispose(), [geo])
   // Holes: cutters in the same group are taken out of this part (worked out once per edit).
   const cutters = !p.cutter && p.parent && p.kind !== 'group' && p.array?.mode !== 'surface' ? ctx.all.filter((h) => h.cutter && h.parent === p.parent && h.id !== p.id && !h.hidden && h.kind !== 'group') : NO_CUTTERS

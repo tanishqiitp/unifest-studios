@@ -339,7 +339,7 @@ export interface Project {
 
 // ---------- Model workspace: free 3D parts (Blender-style) ----------
 // Venue axes: x across, y depth (towards the audience), z up. Geometry origin is the bottom centre.
-export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text' | 'sculpt' | 'path' | 'drape'
+export type PartKind = 'group' | 'box' | 'cylinder' | 'sphere' | 'dome' | 'cone' | 'torus' | 'plane' | 'stairs' | 'ramp' | 'lathe' | 'extrude' | 'text' | 'sculpt' | 'path' | 'drape' | 'geodome' | 'truss' | 'helix' | 'tree' | 'mesh'
 export type Vec3 = [number, number, number]
 export interface SavedView {
   id: string
@@ -396,6 +396,8 @@ export interface Part {
   twist?: number // degrees turned from bottom to top
   bend?: number // degrees the width curls into an arc (180 = a standing arch)
   organic?: number // 0..1: smooth sculpted bumps over the surface
+  zUp?: boolean // imported file is Z-up (STL, CAD): stood upright when loaded
+  modelId?: string // imported 3D file (kind 'mesh'), kept in this browser's model store
   cutter?: boolean // a hole: cut out of the other parts in the same group, not drawn itself
   seed?: number // changes the organic pattern
   base?: 'sphere' | 'panel' | 'block' // sculpt: starting shape
