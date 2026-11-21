@@ -4,6 +4,7 @@ import { PartsScene } from './Parts3D'
 import { useContent } from '../lib/useContent'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { hitAt, lightsAt, screensAt } from '../lib/show'
+import { SPEAKERS, type SpeakerId } from '../lib/sound'
 import { pause, play, seek, showNow, usePlayer } from '../lib/showPlayer'
 import { ShowTimeline } from './ShowTimeline'
 import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, PerformanceMonitor, Sky, Stars } from '@react-three/drei'
@@ -935,6 +936,7 @@ function Scene(props: SceneProps) {
         <ScreenMesh key={s.id} s={s} project={project} content={content} look={look} onInfo={onInfo} />
       ))}
       <Fixtures project={project} look={look} palette={palette} motion={motion} quality={quality} />
+      {project.sound?.sources.length ? <SoundSystem project={project} /> : null}
       <PerformanceMonitor onDecline={props.onSlow} flipflops={2} />
       <SetItems project={project} show={show} dropAt={dropAt} onInfo={onInfo} />
       <PartsScene project={project} shadows={quality === 'best'} />
@@ -2244,5 +2246,119 @@ function Labels({ project, look }: { project: Project; look: Look }) {
           </Label>
         ))}
     </>
+  )
+}
+
+// ---------------------------------------------------------------- sound system (from the Sound tab)
+
+const grille = new THREE.MeshStandardMaterial({ color: '#2a2a2a', metalness: 0.2, roughness: 0.85 })
+const silverTube = new THREE.MeshStandardMaterial({ color: '#c8ccd2', metalness: 0.85, roughness: 0.3 })
+/** A truss above this point at or over this height (the hang can be flown from it)? */
+function trussAbove(project: Project, x: number, y: number, z: number) {
+  return project.truss.some((t) => {
+    if (t.height < z) return false
+    const dx = t.x2 - t.x1
+    const dy = t.y2 - t.y1
+    const k = Math.max(0, Math.min(1, ((x - t.x1) * dx + (y - t.y1) * dy) / (dx * dx + dy * dy || 1)))
+    return Math.hypot(t.x1 + dx * k - x, t.y1 + dy * k - y) < 1.5
+  })
+}
+
+/** Speakers where the sound plan puts them: line array hangs with their splay, stacks, stands, wedges, towers. */
+function SoundSystem({ project }: { project: Project }) {
+  return (
+    <group>
+      {/* Flown hangs with no truss over them get a ground-support PA tower with an arm, like a real PA wing. */}
+      {project.sound!.sources
+        .filter((s) => s.flown && !trussAbove(project, s.x, s.y, s.z + 0.5))
+        .map((s) => {
+          const top = s.z + 1.75
+          return (
+            <group key={`tower-${s.id}`} position={[s.x, 0, s.y - 1.1]}>
+              {[-0.18, 0.18].flatMap((dx) =>
+                [-0.18, 0.18].map((dz) => (
+                  <mesh key={`${dx}${dz}`} material={silverTube} position={[dx, top / 2, dz]}>
+                    <cylinderGeometry args={[0.025, 0.025, top, 6]} />
+                  </mesh>
+                )),
+              )}
+              {Array.from({ length: Math.max(2, Math.round(top / 1.2)) }, (_, i) => (
+                <mesh key={i} material={silverTube} position={[0, (i + 0.5) * (top / Math.max(2, Math.round(top / 1.2))), 0.18]} rotation-z={Math.PI / 4}>
+                  <cylinderGeometry args={[0.012, 0.012, 0.5, 4]} />
+                </mesh>
+              ))}
+              <mesh material={silverTube} position={[0, top, 0.55]} rotation-x={Math.PI / 2}>
+                <boxGeometry args={[0.36, 1.5, 0.36]} />
+              </mesh>
+              <mesh material={blackMetal} position={[0, 0.03, 0]}>
+                <boxGeometry args={[1.6, 0.06, 1.6]} />
+              </mesh>
+            </group>
+          )
+        })}
+      {project.sound!.sources.map((s) => {
+        const sp = SPEAKERS[s.kind as SpeakerId] ?? SPEAKERS.top12
+        const yaw = THREE.MathUtils.degToRad(s.aim)
+        const n = Math.max(1, Math.min(24, s.boxes))
+        const w = sp.kind === 'array' ? (s.kind === 'la12' ? 1.1 : 0.9) : sp.kind === 'sub' ? 1.1 : s.kind === 'fill8' ? 0.3 : 0.5
+        const d = sp.kind === 'sub' ? 0.8 : sp.kind === 'array' ? 0.6 : 0.4
+        if (sp.kind === 'array' && s.flown) {
+          // A hang: frame on top, boxes curving down towards the near audience.
+          let y = 0
+          let z = 0
+          let a = 0
+          const boxes = Array.from({ length: n }, (_, i) => {
+            a += THREE.MathUtils.degToRad(i < n / 2 ? 1 : 2 + (i - n / 2) * 0.8)
+            const b = { y, z, a }
+            y -= sp.boxH * Math.cos(a)
+            z += sp.boxH * Math.sin(a)
+            return b
+          })
+          return (
+            <group key={s.id} position={[s.x, s.z, s.y]} rotation-y={yaw}>
+              <mesh material={blackMetal} position={[0, 0.06, 0]}>
+                <boxGeometry args={[w + 0.15, 0.1, d]} />
+              </mesh>
+              <mesh material={blackMetal} position={[0, 0.9, 0]}>
+                <cylinderGeometry args={[0.02, 0.02, 1.6, 6]} />
+              </mesh>
+              {boxes.map((b, i) => (
+                <group key={i} position={[0, b.y - sp.boxH / 2, b.z]} rotation-x={b.a}>
+                  <mesh material={blackMetal} castShadow>
+                    <boxGeometry args={[w, sp.boxH * 0.96, d]} />
+                  </mesh>
+                  <mesh material={grille} position={[0, 0, d / 2 + 0.001]}>
+                    <planeGeometry args={[w * 0.94, sp.boxH * 0.8]} />
+                  </mesh>
+                </group>
+              ))}
+            </group>
+          )
+        }
+        // Ground or stage: subs stack, wedges lie tilted, the rest stand on a pole (delays, side speakers) or a stack.
+        const h = sp.kind === 'sub' ? 0.75 : sp.boxH
+        const pole = (s.role === 'delay' || s.role === 'main' || s.role === 'side') && sp.kind === 'point' ? Math.max(1.4, s.z > 0.5 && s.role === 'delay' ? s.z : 1.4) : 0
+        const base = s.role === 'delay' ? 0 : s.z
+        return (
+          <group key={s.id} position={[s.x, base, s.y]} rotation-y={yaw}>
+            {pole > 0 && (
+              <mesh material={blackMetal} position={[0, pole / 2, 0]}>
+                <cylinderGeometry args={[0.03, 0.05, pole, 8]} />
+              </mesh>
+            )}
+            {Array.from({ length: n }, (_, i) => (
+              <group key={i} position={sp.kind === 'monitor' ? [(i - (n - 1) / 2) * 0.7, 0.2, 0] : [0, pole + h / 2 + i * h, 0]} rotation-x={sp.kind === 'monitor' ? -0.7 : 0}>
+                <mesh material={blackMetal} castShadow>
+                  <boxGeometry args={[w, h * 0.97, d]} />
+                </mesh>
+                <mesh material={grille} position={[0, 0, d / 2 + 0.001]}>
+                  <planeGeometry args={[w * 0.9, h * 0.85]} />
+                </mesh>
+              </group>
+            ))}
+          </group>
+        )
+      })}
+    </group>
   )
 }

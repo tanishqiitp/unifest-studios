@@ -26,7 +26,7 @@ export const GROUND_STYLE: Record<GroundItem['kind'], { fill: string; stroke: st
   label: { fill: '#00000000', stroke: '#3f3f3f', name: 'Label', tip: 'Free text note.' },
 }
 
-type Edit = 'ground' | 'stage' | 'truss' | 'seating' | 'decor'
+type Edit = 'ground' | 'stage' | 'truss' | 'seating' | 'decor' | 'sound'
 
 export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sightlines?: boolean; extra?: ReactNode }) {
   const p = useStore((s) => s.project)

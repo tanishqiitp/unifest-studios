@@ -284,6 +284,8 @@ export function liteProject(p: Project, images = false): Project {
     // Sculpted shapes are too large for a link in the address, so those links show the plain shape.
     // Imported 3D files stay in the designer's browser, like Decor's models.
     parts: p.parts?.length ? p.parts.filter((x) => x.kind !== 'mesh').map((x) => ({ ...x, sculpt: images ? x.sculpt : undefined, paint: images ? x.paint : undefined, mat: { ...x.mat, map: images ? x.mat.map : undefined } })) : undefined,
+    // The client sees the speakers in 3D; the input list and monitor mixes are crew paperwork.
+    sound: p.sound ? { ...p.sound, inputs: undefined, mixes: undefined } : undefined,
     setContent: images || !p.setContent?.startsWith('data:') ? p.setContent : undefined,
     brand: p.brand ? { ...p.brand, logo: images ? p.brand.logo : undefined } : undefined,
     quote: undefined,

@@ -42,7 +42,8 @@ export function loadSummary(p: Project): LoadSummary {
   const otherW = continuous - cabinetW
   const motorW = rows.filter((r) => powerKind(r) === 'motor').reduce((a, r) => a + r.powerW, 0)
   const unverified: string[] = []
-  if (p.fixtures.some((f) => f.kind === 'line-array' || f.kind === 'sub')) unverified.push('Loudspeaker amplifier power is not included (no model specified).')
+  if (!p.sound?.sources.length && p.fixtures.some((f) => f.kind === 'line-array' || f.kind === 'sub')) unverified.push('Loudspeaker amplifier power is not included (no model specified).')
+  if (p.sound?.sources.length) unverified.push('Sound power is a typical draw per speaker type (generic models), not a measured figure.')
   if ((p.parts ?? []).length) unverified.push('Modelled parts use an estimated 12 kg per m² of surface.')
   if ((p.set ?? []).length) unverified.push('Set pieces use estimated weights per m².')
   return { rows, weightKg, trussLoadKg, groundKg: weightKg - trussLoadKg, ledMaxW, ledAvgW, otherW, continuousMaxW: cabinetW + otherW, motorW, unverified }

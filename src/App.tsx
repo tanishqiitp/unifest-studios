@@ -7,7 +7,7 @@ import { AppCrash, ErrorBoundary, retryImport, Safe3D } from './components/Safe3
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
-import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Trash2, Undo2 } from 'lucide-react'
+import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Trash2, Undo2, Volume2 } from 'lucide-react'
 import { redo, saveNow, undo, useSave, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -17,6 +17,7 @@ import { fetchShare, shareCodeFromPath, useAuth } from './lib/cloud'
 import { AccountButton } from './components/Account'
 import { generateProject, EVENT_TYPES, TEMPLATES, type EventType, type WizardInput } from './lib/templates'
 import { LedWorkspace, newScreen } from './workspaces/Led'
+import { SoundWorkspace } from './workspaces/Sound'
 import { GroundWorkspace } from './workspaces/Ground'
 import { StageWorkspace } from './workspaces/Stage'
 import { TrussWorkspace } from './workspaces/Truss'
@@ -55,15 +56,16 @@ const TABS: { id: Workspace; label: string; short: string; kicker: string; icon:
   { id: 'set', label: 'Set Design', short: 'Set', kicker: '03', icon: Castle, tip: 'Festival facades: towers, frames, arches, LED, bulb outlines, cut-outs, themes' },
   { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '04', icon: Spline, tip: 'Truss, hoists, lights and speakers, with live weights' },
   { id: 'led', label: 'LED Screens', short: 'LED', kicker: '05', icon: MonitorPlay, tip: 'Screen sizes, pixels, cabling and power' },
-  { id: 'seating', label: 'Seating', short: 'Seats', kicker: '06', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
-  { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '07', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
+  { id: 'sound', label: 'Sound', short: 'Sound', kicker: '06', icon: Volume2, tip: 'Speakers, coverage map, delay towers, input list and monitor mixes' },
+  { id: 'seating', label: 'Seating', short: 'Seats', kicker: '07', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
+  { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '08', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
   { id: 'model', label: '3D Model', short: 'Model', kicker: '★', icon: Shapes, tip: 'Blender-style 3D modelling: shapes, spin, extrude, arrays, groups, materials' },
-  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '08', icon: Box, tip: 'See everything in 3D, render images and videos' },
-  { id: 'plan', label: 'Plan', short: 'Plan', kicker: '09', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
-  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '10', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
+  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '09', icon: Box, tip: 'See everything in 3D, render images and videos' },
+  { id: 'plan', label: 'Plan', short: 'Plan', kicker: '10', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
+  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '11', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
 ]
 
-const EDIT_WS = ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor']
+const EDIT_WS = ['ground', 'stage', 'set', 'truss', 'led', 'sound', 'seating', 'decor']
 
 // Number keys 1-9 open these, in order (the Model tab is opened by clicking).
 const KEYED = TABS.filter((t) => t.id !== 'model')
@@ -162,6 +164,7 @@ function Studio() {
         {ui.workspace === 'stage' && <StageWorkspace />}
         {ui.workspace === 'truss' && <TrussWorkspace />}
         {ui.workspace === 'led' && <LedWorkspace />}
+        {ui.workspace === 'sound' && <SoundWorkspace />}
         {ui.workspace === 'seating' && <SeatingWorkspace />}
         {ui.workspace === 'viz' && (
           <Safe3D onExit={() => useStore.getState().setUI({ workspace: 'ground' })} exitLabel="Back to Ground plan">

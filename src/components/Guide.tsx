@@ -19,6 +19,15 @@ const GUIDES: Partial<Record<Workspace, { title: string; steps: string[]; next?:
     ],
     next: ['viz', 'See it in the 3D Visualizer'],
   },
+  sound: {
+    title: 'Plan the sound',
+    steps: [
+      'Pick the kind of event and press Auto design: mains, subwoofers, front fills, delay towers and monitors are sized and placed.',
+      'The map shows how loud each part of the crowd will be: green is right, blue too quiet, red too loud. Drag speakers to move them, drag the dot to aim.',
+      'Fill the input list and monitor mixes for the crew. Everything goes into the quote, power, weight, 3D and the technical PDF.',
+    ],
+    next: ['seating', 'Seating'],
+  },
   ground: {
     title: 'Plan the ground',
     steps: ['Set the venue size, or upload a site photo to trace over (left panel).', 'Add crowd, FOH, barricade and exits. Drag to move, pull corners to resize.', 'Capacity and sightlines update as you go.'],

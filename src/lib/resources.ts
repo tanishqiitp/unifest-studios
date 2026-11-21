@@ -2,6 +2,7 @@ import type { CrewMember, Project } from '../types'
 import type { EquipRow } from './export/equipment'
 import { readLibrary, readProject } from './library'
 import { fullEquipment } from './quote'
+import { soundPower } from './sound'
 
 // ---------- Inventory (this browser's own stock) ----------
 
@@ -117,7 +118,8 @@ export function generatorPlan(p: Project) {
   const rows = fullEquipment(p).filter((r) => r.category !== 'Sound')
   const la = p.fixtures.filter((f) => f.kind === 'line-array').length
   const subs = p.fixtures.filter((f) => f.kind === 'sub').length
-  const soundW = Math.ceil(la / 4) * 3000 + subs * 1500 // amplifier draw
+  // Amplifier draw: from the sound plan when there is one, else a rule of thumb for basic speakers.
+  const soundW = p.sound?.sources.length ? soundPower(p) : Math.ceil(la / 4) * 3000 + subs * 1500
   const connectedW = rows.reduce((a, r) => a + r.powerW, 0) + soundW
   const demandW = rows.reduce((a, r) => a + r.powerW * (DIVERSITY[r.category] ?? 1), 0) + soundW
   const demandKva = demandW / 1000 / 0.8 // power factor 0.8
@@ -151,13 +153,13 @@ export function crewSuggestion(p: Project): CrewSuggestion[] {
   }
   const cabinets = fullEquipment(p).filter((r) => r.category === 'LED' && /cabinet$/.test(r.item)).reduce((a, r) => a + r.qty, 0)
   const fixtures = p.fixtures.filter((f) => f.kind !== 'line-array' && f.kind !== 'sub').length
-  const sound = p.fixtures.some((f) => f.kind === 'line-array' || f.kind === 'sub')
+  const sound = !!p.sound?.sources.length || p.fixtures.some((f) => f.kind === 'line-array' || f.kind === 'sub')
   const decor = p.decor?.length ?? 0
   add(1, 'Production Manager', 'Production')
   if (cabinets) add(Math.ceil(cabinets / 150) + 1, 'LED Technician', 'LED')
   if (p.hoists.length) add(Math.max(2, Math.ceil(p.hoists.length / 4)), 'Rigger', 'Rigging')
   if (fixtures) add(Math.ceil(fixtures / 20) + 1, 'Lighting Technician', 'Lighting')
-  if (sound) add(2, 'Sound Engineer', 'Sound')
+  if (sound) add(p.sound?.sources.some((s) => s.role === 'delay') ? 3 : 2, 'Sound Engineer', 'Sound')
   if (p.decks.length) add(Math.ceil(p.decks.length / 10) + 2, 'Stage Hand', 'Stage')
   if (decor > 0) add(Math.ceil(decor / 15) + 1, 'Decor Crew', 'Decor')
   if (p.ground.some((g) => g.kind === 'generator')) add(1, 'Power Technician', 'Power')

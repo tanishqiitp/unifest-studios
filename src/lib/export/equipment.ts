@@ -1,4 +1,5 @@
 import type { Project } from '../../types'
+import { soundRows } from '../sound'
 import { fmt, FIXTURE_INFO, portMap, powerPlan, screenStats, stockPieces, trussLength, TRUSS_INFO } from '../calc'
 
 export interface EquipRow {
@@ -48,7 +49,14 @@ export function equipmentList(p: Project): EquipRow[] {
 
   for (const d of p.decks) add('Stage', `Stage deck ${fmt(d.w, 2)}×${fmt(d.l, 2)} m`, 1, 'pcs', d.w * d.l * 25)
 
-  for (const f of p.fixtures) add(f.kind === 'line-array' || f.kind === 'sub' ? 'Sound' : 'Lighting', FIXTURE_INFO[f.kind].name, 1, 'pcs', FIXTURE_INFO[f.kind].weight, FIXTURE_INFO[f.kind].watts)
+  // A sound plan (Sound tab) replaces the basic speaker fixtures placed in rigging.
+  const planned = !!p.sound?.sources.length
+  for (const f of p.fixtures) {
+    const speaker = f.kind === 'line-array' || f.kind === 'sub'
+    if (speaker && planned) continue
+    add(speaker ? 'Sound' : 'Lighting', FIXTURE_INFO[f.kind].name, 1, 'pcs', FIXTURE_INFO[f.kind].weight, FIXTURE_INFO[f.kind].watts)
+  }
+  for (const r of soundRows(p)) add('Sound', r.item, r.qty, r.unit, r.weightKg, r.powerW)
 
   for (const g of p.ground) {
     if (g.kind === 'barricade') add('Site', 'Crowd barricade', Math.ceil(Math.max(g.w, g.h)), 'm')
