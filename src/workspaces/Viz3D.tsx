@@ -3,6 +3,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { PartsScene } from './Parts3D'
 import { useContent } from '../lib/useContent'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
+import { hitAt, lightsAt, screensAt } from '../lib/show'
+import { showNow } from '../lib/showPlayer'
+import { ShowTimeline } from './ShowTimeline'
 import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, PerformanceMonitor, Sky, Stars } from '@react-three/drei'
 import { useDevice } from '../lib/device'
 import { Bloom, EffectComposer, ToneMapping, Vignette } from '@react-three/postprocessing'
@@ -11,7 +14,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import type { OrbitControls as OrbitImpl } from 'three-stdlib'
-import { Zap, Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Hand, Maximize, Orbit, Rotate3d, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { Zap, Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Hand, ListMusic, Maximize, Orbit, Rotate3d, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useStore } from '../store'
 import type { Fixture, GroundItem, Project, Screen, Table, Truss } from '../types'
 import { fmt, screenColumns, screenStats, stageBounds, TRUSS_INFO, trussLength } from '../lib/calc'
@@ -28,7 +31,7 @@ export type Look = 'show' | 'day' | 'tech'
 export type Quality = 'draft' | 'show' | 'best'
 type QualityPref = 'auto' | Quality
 const QKEY = 'unifest:quality'
-export type Palette = 'white' | 'warm' | 'ice' | 'duo' | 'rainbow'
+export type Palette = 'white' | 'warm' | 'ice' | 'duo' | 'rainbow' | 'red' | 'green'
 type RecordReq = { aspect: '16:9' | '9:16'; seconds: number; id: number }
 export type ViewCmd = { kind: 'rotate' | 'tilt' | 'zoom' | 'set-az' | 'set-el' | 'view' | 'reset' | 'pan' | 'fit'; value: number | string | [number, number]; n: number }
 // Orbit: left-drag turns the view. Grab: left-drag slides across the ground like a map.
@@ -98,6 +101,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [recMenu, setRecMenu] = useState(false)
   const [info, setInfo] = useState<Info | null>(null)
   const [dropAt, setDropAt] = useState(0)
+  const [showOpen, setShowOpen] = useState(false)
+  const hasShow = !!project.show?.cues.length
   const [viewCmd, setViewCmd] = useState<ViewCmd | null>(null)
   const [angles, setAngles] = useState<Angles>({ az: 0, el: 20 })
   const [navPref, setNavPref] = useState<Nav>('orbit')
@@ -242,6 +247,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
         />
       </Canvas>
 
+      {showOpen && <ShowTimeline project={project} editable={!compact} onClose={() => setShowOpen(false)} />}
+
       {/* Camera bar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 w-max glass rounded-xl flex flex-wrap items-center justify-center gap-1 p-1 max-w-[95vw] z-10">
         {PRESETS.filter(([k]) => !compact || k !== 'stage').map(([k, l]) => (
@@ -295,6 +302,18 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
             <Tag size={14} />
           </button>
         )}
+        {compact && hasShow && (
+          <button
+            className={`btn h-8 ${showOpen ? 'btn-on' : ''}`}
+            title="Play the programmed show"
+            onClick={() => {
+              if (!showOpen) (setLook('show'), setShowcase(false))
+              setShowOpen(!showOpen)
+            }}
+          >
+            <ListMusic size={14} /> Show
+          </button>
+        )}
         {!compact && (
           <>
             <div className="w-px h-5 bg-line mx-1" />
@@ -321,6 +340,17 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
               <option value="show">Show</option>
               <option value="best">Best</option>
             </select>
+            <button
+              className={`btn h-8 ${showOpen ? 'btn-on' : ''}`}
+              title="Show timeline: program lights, screens and effects to your music, then play the show in 3D"
+              aria-pressed={showOpen}
+              onClick={() => {
+                if (!showOpen) (setLook('show'), setShowcase(false))
+                setShowOpen(!showOpen)
+              }}
+            >
+              <ListMusic size={14} /> Show
+            </button>
             <button className="btn h-8" title="Fire every effect at once: pyro, CO₂, flames, a strobe flash and the LED flash" onClick={() => (setDropAt(performance.now()), setShowcase(false))}>
               <Zap size={14} /> Drop
             </button>
@@ -854,7 +884,9 @@ function DropFlash({ dropAt }: { dropAt: number }) {
   useFrame(() => {
     if (!l.current) return
     const t = (performance.now() - dropAt) / 1000
-    l.current.intensity = dropAt && t >= 0 && t < 1 ? (Math.sin(t * 50) > 0 ? 6 * (1 - t) : 0) : 0
+    const sn = showNow()
+    const hit = sn ? hitAt(sn.show, sn.t) * 5 : 0
+    l.current.intensity = Math.max(hit, dropAt && t >= 0 && t < 1 ? (Math.sin(t * 50) > 0 ? 6 * (1 - t) : 0) : 0)
   })
   return <ambientLight ref={l} intensity={0} color="#ffffff" />
 }
@@ -1146,6 +1178,20 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
   })
   const virtual = new Set(s.virtual)
   const glow = (look === 'show' ? 1.6 : look === 'day' ? 1.15 : 1) * (s.brightness ?? 1)
+  // Show cues: black, a white flash that fades, or a colour tint over the content.
+  const faces = useRef<(THREE.MeshBasicMaterial | null)[]>([])
+  const tint = useMemo(() => new THREE.Color(), [])
+  useFrame(() => {
+    const sn = showNow()
+    const sc = sn ? screensAt(sn.show, sn.t) : null
+    for (const m of faces.current) {
+      if (!m) continue
+      if (!sc || sc.mode === 'content') m.color.setScalar(glow)
+      else if (sc.mode === 'black') m.color.setScalar(0)
+      else if (sc.mode === 'flash') m.color.setScalar(glow * (1 + 5 * sc.flash))
+      else m.color.copy(tint.set(sc.color ?? '#3355ff')).multiplyScalar(glow * 1.4)
+    }
+  })
   const tilt = THREE.MathUtils.degToRad(s.tilt ?? 0)
   const frameColor = s.frame === 'silver' ? '#c9ccd1' : s.frame === 'brand' ? (project.brand?.color ?? '#ffffff') : '#050505'
   const mid = cols[Math.floor(cols.length / 2)]
@@ -1180,7 +1226,7 @@ function ScreenMesh({ s, project, content, look, onInfo }: { s: Screen; project:
           </mesh>
           <mesh>
             <planeGeometry args={[cw * 0.997, st.h]} />
-            <meshBasicMaterial map={texes[i]} color={[glow, glow, glow]} toneMapped={false} />
+            <meshBasicMaterial ref={(m: THREE.MeshBasicMaterial | null) => void (faces.current[i] = m)} map={texes[i]} color={[glow, glow, glow]} toneMapped={false} />
           </mesh>
           {Array.from({ length: s.rows }, (_, r) =>
             virtual.has(r * s.cols + i) ? (
@@ -1801,6 +1847,10 @@ function paletteColor(p: Palette, i: number, t: number, out: THREE.Color) {
       return out.set(i % 2 ? '#4b5bff' : '#ff2bd6')
     case 'rainbow':
       return out.setHSL((i * 0.09 + t * 0.08) % 1, 1, 0.55)
+    case 'red':
+      return out.set('#ff2233')
+    case 'green':
+      return out.set('#22ff77')
   }
 }
 
@@ -1973,6 +2023,16 @@ function Rig({ lights, on, palette, motion, haze, quality }: { lights: Fixture[]
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
+    // While a show plays, its lights cue sets the colours, movement, level and strobe.
+    const sn = showNow()
+    const ls = sn ? lightsAt(sn.show, sn.t) : null
+    const hit = sn ? hitAt(sn.show, sn.t) : 0
+    const moving = ls ? ls.speed > 0 : motion
+    const pace = ls ? ls.speed : 1
+    const gain = ls ? ls.level * (ls.strobe ? (Math.sin(t * 45) > 0 ? 1.4 : 0) : 1) : 1
+    const pal = ls ? (ls.palette as Palette) : palette
+    if (ls?.color) tmp.c2.set(ls.color)
+    const single = ls?.color ? tmp.c2.clone() : null
     const aim = (f: Fixture, i: number) => {
       const ph = i * 1.37
       const fan = ((i % 7) - 3) * 0.2
@@ -1984,8 +2044,8 @@ function Rig({ lights, on, palette, motion, haze, quality }: { lights: Fixture[]
       } else if (f.kind === 'par') {
         pan = Math.PI + fan * 0.5
         tilt = 0.45
-      } else if (motion && on) {
-        const speed = f.kind === 'beam' ? 1.1 : 0.55
+      } else if (moving && on) {
+        const speed = (f.kind === 'beam' ? 1.1 : 0.55) * pace
         pan = fan + Math.sin(t * speed + ph) * 0.7
         tilt = 0.55 + Math.sin(t * speed * 0.8 + ph * 1.3) * 0.35
       } else {
@@ -1997,9 +2057,10 @@ function Rig({ lights, on, palette, motion, haze, quality }: { lights: Fixture[]
     }
     const colorOf = (f: Fixture, i: number) => {
       const o = own.get(f.id)
-      if (o) tmp.c.copy(o)
-      else paletteColor(palette, i, t, tmp.c)
-      return tmp.c.multiplyScalar(f.intensity ?? 1)
+      if (single) tmp.c.copy(single)
+      else if (o) tmp.c.copy(o)
+      else paletteColor(pal, i, t, tmp.c)
+      return tmp.c.multiplyScalar((f.intensity ?? 1) * gain)
     }
 
     heads.forEach((f, k) => {
@@ -2037,7 +2098,7 @@ function Rig({ lights, on, palette, motion, haze, quality }: { lights: Fixture[]
       bBody.current?.setMatrixAt(k, tmp.m)
       tmp.m.compose(tmp.p, tmp.q, tmp.one).multiply(tmp.m2.makeTranslation(0, -0.21, 0)).multiply(tmp.lensRot)
       bLens.current?.setMatrixAt(k, tmp.m)
-      const flash = motion ? Math.pow(Math.max(0, Math.sin(t * 3.3 + i * 1.37)), 12) : 0.3
+      const flash = sn ? hit * 1.2 : motion ? Math.pow(Math.max(0, Math.sin(t * 3.3 + i * 1.37)), 12) : 0.3
       bLens.current?.setColorAt(k, tmp.c2.setRGB(1 + flash * 5, 0.85 + flash * 4, 0.6 + flash * 3))
     })
     for (const r of all) {

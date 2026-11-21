@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fxActive, type FxKind } from '../lib/show'
+import { showNow } from '../lib/showPlayer'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -413,7 +415,10 @@ function Effect({ d, show, motion, dropAt }: { d: Decor; show: boolean; motion: 
   useFrame(({ clock }, dt) => {
     // During a drop every effect fires for 4 seconds, even ones switched off.
     const sinceDrop = (performance.now() - dropAt) / 1000
-    const firing = steady || (dropAt > 0 && sinceDrop >= 0 && sinceDrop < 4)
+    // While a show is open its effects cues decide when each effect fires.
+    const sn = showNow()
+    const cued = sn ? fxActive(sn.show, sn.t, kind as FxKind) : steady
+    const firing = cued || (dropAt > 0 && sinceDrop >= 0 && sinceDrop < 4)
     const { pos, col, vel, age } = state
     const t = clock.elapsedTime
     const H = d.h * k
