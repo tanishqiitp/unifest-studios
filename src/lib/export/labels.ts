@@ -14,5 +14,7 @@ export const GROUND_LABELS: Record<GroundItem['kind'], string> = {
   greenroom: 'Green room',
   washroom: 'Washrooms',
   food: 'Food court',
+  building: 'Building / structure',
+  tree: 'Tree',
   label: 'Label',
 }

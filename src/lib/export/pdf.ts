@@ -4,6 +4,7 @@ import type { Project } from '../../types'
 import { fmt, pixelLayout, portMap, powerPlan, rigging, screenColumns, screenStats, totals, TRUSS_INFO, VOLTS } from '../calc'
 import { getWarnings } from '../warnings'
 import { loadSummary } from '../loads'
+import { coverage, EVENTS, hangKg, ROLE_NAMES, soundWarnings, SPEAKERS, targetOf, type SpeakerId } from '../sound'
 import { pixelMapCanvas, slug } from './files'
 import { GROUND_LABELS } from './labels'
 
@@ -220,6 +221,42 @@ export function exportTechnicalPDF(p: Project) {
     foot: [[t.capacityStatus === 'ok' ? `Space estimate ~${t.capacity.toLocaleString('en-IN')} (not a licensed capacity)` : 'Space estimate unverified: fix audience zones', `Expected ${p.audience.toLocaleString('en-IN')}`, `${fmt(p.venue.w, 1)} × ${fmt(p.venue.l, 1)} m`]],
     footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] },
   })
+
+  // Sound: speaker plan, coverage, input list and monitor mixes, for the sound crew.
+  const snd = p.sound
+  if (snd?.sources.length || snd?.inputs?.length) {
+    doc.addPage()
+    header(doc, p, 'Sound system')
+    let y = 24
+    if (snd.sources.length) {
+      const cov = coverage(p, snd)
+      const st = cov.stats
+      doc.setFontSize(9)
+      doc.text(
+        `${EVENTS[snd.event].name}  ·  target ${targetOf(snd)} dB at FOH  ·  FOH ${st.foh !== null ? Math.round(st.foh) : '-'} dB  ·  ${Math.round(st.even * 100)}% of audience within ±3 dB  ·  headroom ${Math.round(st.headroom)} dB  ·  planning estimate ±3–6 dB`,
+        MARGIN,
+        y,
+      )
+      autoTable(doc, {
+        ...tableStyle,
+        startY: y + 4,
+        head: [['Speaker', 'Role', 'Type', 'Qty', 'Across', 'Depth', 'Height', 'Aim', 'Delay', 'Weight']],
+        body: snd.sources.map((s) => {
+          const sp = SPEAKERS[s.kind as SpeakerId]
+          return [s.label || ROLE_NAMES[s.role], ROLE_NAMES[s.role], sp?.name ?? s.kind, s.boxes, `${fmt(s.x, 1)} m`, `${fmt(s.y, 1)} m`, `${fmt(s.z, 1)} m${s.flown ? ' (hang top)' : ''}`, `${s.aim}°`, s.delay ? `${s.delay} ms` : '', `${Math.round(hangKg(s))} kg`]
+        }),
+      })
+      const warn = soundWarnings(p, cov)
+      if (warn.length) autoTable(doc, { ...tableStyle, head: [['Sound check']], body: warn.map((x) => [x]) })
+    }
+    if (snd.inputs?.length)
+      autoTable(doc, {
+        ...tableStyle,
+        head: [['Ch', 'Input', 'Mic / DI', 'Stand', '48 V', 'Notes']],
+        body: snd.inputs.map((c, i) => [i + 1, c.name, c.source, c.stand ?? '', c.phantom ? 'Yes' : '', c.notes ?? '']),
+      })
+    if (snd.mixes?.length) autoTable(doc, { ...tableStyle, head: [['Mix', 'Name', 'Contents']], body: snd.mixes.map((m, i) => [i + 1, m.name, m.feeds]) })
+  }
 
   // Equipment + checks
   doc.addPage()

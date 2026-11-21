@@ -1,7 +1,7 @@
 // All distances are metres, weights kg, power watts.
 // Top view: x runs across the venue, y runs from the back of the stage (0) towards the audience.
 
-export type Workspace = 'ground' | 'stage' | 'set' | 'truss' | 'led' | 'seating' | 'decor' | 'model' | 'viz' | 'plan' | 'deliver'
+export type Workspace = 'ground' | 'stage' | 'set' | 'truss' | 'led' | 'sound' | 'seating' | 'decor' | 'model' | 'viz' | 'plan' | 'deliver'
 export type Mode = 'simple' | 'pro'
 export type Units = 'm' | 'ft'
 
@@ -63,6 +63,8 @@ export type GroundKind =
   | 'greenroom'
   | 'washroom'
   | 'food'
+  | 'building'
+  | 'tree'
   | 'label'
 
 export interface GroundItem {
@@ -246,6 +248,44 @@ export interface ShowCue {
   screen?: 'content' | 'black' | 'flash' | 'tint'
   fx?: string // cold-pyro, co2-jet, flame, confetti, firework, smoke, bubble, blinder, all
 }
+// Sound system plan (venue axes: x across, y towards the audience, z up; aim 0° = towards the audience).
+export type SoundRole = 'main' | 'sub' | 'fill' | 'delay' | 'monitor' | 'side'
+export interface SoundSource {
+  id: string
+  kind: string // speaker type (lib/sound SPEAKERS)
+  role: SoundRole
+  x: number
+  y: number
+  z: number // flown: top of the hang; on the ground or stage: base height
+  aim: number // degrees: 0 = straight at the audience, + = towards audience-left (+x)
+  boxes: number // boxes in a line array hang, or speakers in a stack
+  flown: boolean
+  delay?: number // ms
+  manualDelay?: boolean // delay typed by hand: not updated when the speaker moves
+  gain?: number // dB set by the engineer (worked out for coverage, not stored)
+  label?: string
+}
+export interface InputChannel {
+  id: string
+  name: string
+  source: string // mic, DI or line
+  stand?: string
+  phantom?: boolean
+  notes?: string
+}
+export interface MonitorMix {
+  id: string
+  name: string
+  feeds: string
+}
+export interface SoundPlan {
+  event: 'speech' | 'wedding' | 'band' | 'dj'
+  target?: number // dB at the mixing desk; default by event
+  sources: SoundSource[]
+  inputs?: InputChannel[]
+  mixes?: MonitorMix[]
+}
+
 export interface Show {
   cues: ShowCue[]
   length: number // seconds
@@ -329,7 +369,7 @@ export interface Project {
   name: string
   eventType: string
   units: Units
-  venue: { w: number; l: number; image?: string; imageScale?: number }
+  venue: { w: number; l: number; image?: string; imageScale?: number; outline?: [number, number][] } // outline: traced plot boundary
   audience: number
   screens: Screen[]
   ground: GroundItem[]
@@ -353,13 +393,14 @@ export interface Project {
   quote?: QuoteSettings
   cues?: Cue[]
   show?: Show // show playback timeline (3D Visualizer)
+  sound?: SoundPlan // sound system: speakers, coverage target, inputs and monitor mixes
   crew?: CrewMember[]
   comments?: Comment[]
   approval?: Approval
   checklist?: ChecklistState
   eventDate?: string // YYYY-MM-DD
   eventDays?: number
-  look?: { haze?: number } // 3D atmosphere
+  look?: { haze?: number; palette?: string; theme?: string } // 3D atmosphere, light colours and theme pack
 }
 
 // ---------- Model workspace: free 3D parts (Blender-style) ----------

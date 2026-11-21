@@ -93,6 +93,19 @@ export const fullEquipment = (p: Project): EquipRow[] => [...equipmentList(p), .
 
 // Lower-case keyword -> INR per unit per day, checked in order.
 export const DEFAULT_RATES: Record<string, number> = {
+  // Sound plan items first, so 'tower' or 'line array' below don't catch them.
+  '12″ line array': 4500,
+  '10″ line array': 3500,
+  '15″ point-source': 2000,
+  '12″ point-source': 1500,
+  'front-fill speaker': 800,
+  'stage monitor': 1000,
+  'flying frame': 1500,
+  'chain motor 1 t': 3000,
+  'delay tower': 6000,
+  'mixing console': 12000,
+  'cabling (per source)': 300,
+  'microphone / di': 300,
   'led processor': 6000,
   'data cable': 50,
   cabinet: 900,

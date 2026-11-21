@@ -86,7 +86,7 @@ function SetCad3DView({ compact, edit = 'set' }: { compact?: boolean; edit?: str
           </>
         )}
       </div>
-      {!compact && <div className="absolute left-4 bottom-4 text-[11px] text-mute">Drag to orbit · right-drag to pan · scroll to zoom · click an item, then drag the arrows (red X across, blue Y depth, green Z height)</div>}
+      {!compact && <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden xl:block max-w-[45%]">Drag to orbit · right-drag to pan · scroll to zoom · click an item, then drag the arrows (red X across, blue Y depth, green Z height)</div>}
     </div>
   )
 }

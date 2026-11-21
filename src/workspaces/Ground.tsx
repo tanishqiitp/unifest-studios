@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Circle, Line, Rect, Text } from 'react-konva'
 import { nanoid } from 'nanoid'
-import { Building2, Copy, Trash2, Upload } from 'lucide-react'
+import { Building2, Copy, Ruler, Spline, Trash2, TreePine, Upload, Warehouse } from 'lucide-react'
 import { useStore } from '../store'
 import type { GroundItem } from '../types'
-import { PlanCanvas } from '../components/PlanCanvas'
+import { PlanCanvas, useView } from '../components/PlanCanvas'
 import { GROUND_STYLE, TopView } from '../components/TopView'
 import { fmt } from '../lib/calc'
 import { audienceEstimate, audienceVerdict } from '../lib/capacity'
@@ -23,6 +24,8 @@ const DEFAULT_SIZE: Record<GroundItem['kind'], [number, number]> = {
   greenroom: [6, 4],
   washroom: [4, 6],
   food: [6, 8],
+  building: [12, 8],
+  tree: [5, 5],
   label: [6, 1.5],
 }
 
@@ -36,6 +39,59 @@ export function GroundWorkspace() {
   const verdict = audienceVerdict(est, project.audience)
   const zoneEst = item ? est.zones.find((z) => z.id === item.id) : undefined
   const file = useRef<HTMLInputElement>(null)
+  // Tracing a site photo: set its scale from a known distance, outline the plot, mark buildings and trees.
+  const [trace, setTrace] = useState<Trace>(null)
+  const [pts, setPts] = useState<{ x: number; y: number }[]>([])
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null)
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
+  const stop = () => (setTrace(null), setPts([]), setDrag(null))
+  const finishBoundary = (list = pts) => {
+    if (list.length < 3) return stop()
+    mutate((p) => void (p.venue.outline = list.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)] as [number, number])))
+    useStore.getState().notify('Plot boundary traced. Use “Fit venue to plot” if the venue should match it.')
+    stop()
+  }
+  useEffect(() => {
+    if (!trace) return
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') stop()
+      if (e.key === 'Enter' && trace === 'boundary') finishBoundary()
+    }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  })
+  const down = (w: { x: number; y: number }) => {
+    if (!trace) return
+    if (trace === 'scale') {
+      const next = [...pts, w]
+      if (next.length < 2) return setPts(next)
+      const d = Math.hypot(next[1].x - next[0].x, next[1].y - next[0].y)
+      const real = Number(prompt('How many metres apart are these two points in real life?', String(Math.round(d * 10) / 10)))
+      if (real > 0 && d > 0.01) {
+        mutate((p) => void (p.venue.imageScale = +((p.venue.imageScale ?? p.venue.w) * (real / d)).toFixed(2)))
+        useStore.getState().notify(`Image scale set: ${real} m between the points. The plan now matches the photo.`)
+      }
+      return stop()
+    }
+    if (trace === 'boundary') {
+      const first = pts[0]
+      if (first && pts.length >= 3 && Math.hypot(w.x - first.x, w.y - first.y) < 1.5) return finishBoundary()
+      return setPts([...pts, w])
+    }
+    if (trace === 'building') return setDrag(w)
+    if (trace === 'tree')
+      mutate((p) => void p.ground.push({ id: nanoid(8), kind: 'tree', x: +(w.x - 2.5).toFixed(2), y: +(w.y - 2.5).toFixed(2), w: 5, h: 5, rotation: 0, label: 'Tree' }))
+  }
+  const up = (w: { x: number; y: number }) => {
+    if (trace !== 'building' || !drag) return
+    const x = Math.min(drag.x, w.x)
+    const y = Math.min(drag.y, w.y)
+    const bw = Math.abs(w.x - drag.x)
+    const bh = Math.abs(w.y - drag.y)
+    setDrag(null)
+    if (bw < 0.5 || bh < 0.5) return
+    mutate((p) => void p.ground.push({ id: nanoid(8), kind: 'building', x: +x.toFixed(2), y: +y.toFixed(2), w: +bw.toFixed(2), h: +bh.toFixed(2), rotation: 0, label: 'Building' }))
+  }
 
   const add = (kind: GroundItem['kind']) =>
     mutate((p) => {
@@ -81,6 +137,59 @@ export function GroundWorkspace() {
               </button>
             </>
           )}
+          <div className="label pt-1">Trace the site</div>
+          <div className="grid grid-cols-2 gap-1">
+            {(
+              [
+                ['scale', 'Set scale', Ruler, 'Click two points a known distance apart (a road, a wall, a tent) and type the real distance: the photo then matches the grid.'],
+                ['boundary', 'Plot boundary', Spline, 'Click around the edge of the plot; click the first point (or press Enter) to close it.'],
+                ['building', 'Building', Warehouse, 'Drag a box over each building, wall or fixed structure.'],
+                ['tree', 'Trees', TreePine, 'Click on each tree. Press Esc when done.'],
+              ] as const
+            ).map(([k, l, Icon, tip]) => (
+              <button key={k} className={`btn h-8 text-[11px] justify-center ${trace === k ? 'btn-on' : ''}`} title={tip} disabled={k === 'scale' && !project.venue.image} onClick={() => (trace === k ? stop() : (setPts([]), setTrace(k)))}>
+                <Icon size={12} /> {l}
+              </button>
+            ))}
+          </div>
+          {trace && (
+            <p className="text-[11px] text-dim leading-snug">
+              {
+                {
+                  scale: pts.length ? 'Now click the second point.' : 'Click the first of two points a known distance apart.',
+                  boundary: pts.length < 3 ? 'Click the corners of the plot.' : 'Keep clicking corners; click the first point or press Enter to finish.',
+                  building: 'Drag a box over a building or structure.',
+                  tree: 'Click on each tree.',
+                }[trace]
+              }{' '}
+              Esc to stop.
+            </p>
+          )}
+          {trace === 'boundary' && pts.length >= 3 && (
+            <button className="btn btn-primary h-8 w-full justify-center text-[11px]" onClick={() => finishBoundary()}>
+              Finish boundary ({pts.length} points)
+            </button>
+          )}
+          {project.venue.outline && !trace && (
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                className="btn h-8 text-[11px] justify-center"
+                title="Make the venue big enough to hold the traced plot"
+                onClick={() =>
+                  mutate((p) => {
+                    const o = p.venue.outline!
+                    p.venue.w = Math.ceil(Math.max(...o.map((q) => q[0])) + 1)
+                    p.venue.l = Math.ceil(Math.max(...o.map((q) => q[1])) + 1)
+                  })
+                }
+              >
+                Fit venue to plot
+              </button>
+              <button className="btn h-8 text-[11px] justify-center" onClick={() => mutate((p) => void (p.venue.outline = undefined))}>
+                Remove boundary
+              </button>
+            </div>
+          )}
           <Check label="Show screen sightlines" checked={sight} onChange={setSight} tip="Faint cones show where each screen can be seen; dashed arc is the closest comfortable viewing distance." />
         </Section>
         <Section title="Add to plan">
@@ -95,10 +204,19 @@ export function GroundWorkspace() {
         </Section>
       </aside>
       <div className="relative flex-1 min-w-0 bg-canvas">
-        <PlanCanvas bounds={{ x: -2, y: -2, w: project.venue.w + 4, h: project.venue.l + 4 }} grid={{ x: 0, y: 0, w: project.venue.w, h: project.venue.l }} onBackground={() => select(null)}>
-          <TopView edit="ground" sightlines={sight} />
+        <PlanCanvas
+          bounds={{ x: -2, y: -2, w: project.venue.w + 4, h: project.venue.l + 4 }}
+          grid={{ x: 0, y: 0, w: project.venue.w, h: project.venue.l }}
+          onBackground={() => !trace && select(null)}
+          onWorldDown={down}
+          onWorldMove={(w) => trace && setHover(w)}
+          onWorldUp={up}
+          cursor={trace ? 'crosshair' : undefined}
+        >
+          <TopView edit={trace ? 'sound' : 'ground'} sightlines={sight} />
+          {trace && <TraceOverlay trace={trace} pts={pts} hover={hover} drag={drag} />}
         </PlanCanvas>
-        <div className="absolute left-4 bottom-4 text-[11px] text-mute">Top view · stage at the top · drag to move, handles to resize · double-click a screen to edit it</div>
+        <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden xl:block max-w-[45%]">Top view · stage at the top · drag to move, handles to resize · double-click a screen to edit it</div>
       </div>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {item ? (
@@ -167,4 +285,28 @@ function upd(id: string, patch: Partial<GroundItem>) {
     const g = p.ground.find((x) => x.id === id)
     if (g) Object.assign(g, patch)
   })
+}
+
+type Trace = null | 'scale' | 'boundary' | 'building' | 'tree'
+
+// What is being traced, drawn over the plan as you click.
+function TraceOverlay({ trace, pts, hover, drag }: { trace: Exclude<Trace, null>; pts: { x: number; y: number }[]; hover: { x: number; y: number } | null; drag: { x: number; y: number } | null }) {
+  const v = useView()
+  const col = trace === 'boundary' ? '#fbbf24' : trace === 'scale' ? '#38bdf8' : '#ffffff'
+  const line = [...pts, ...(hover ? [hover] : [])].flatMap((q) => [q.x, q.y])
+  return (
+    <>
+      {line.length >= 4 && <Line points={line} stroke={col} strokeWidth={2} dash={[6, 4]} strokeScaleEnabled={false} listening={false} />}
+      {pts.map((q, i) => (
+        <Circle key={i} x={q.x} y={q.y} radius={(i === 0 && trace === 'boundary' ? 6 : 4) / v.scale} fill={col} listening={false} />
+      ))}
+      {trace === 'scale' && pts.length === 1 && hover && (
+        <Text x={hover.x + 8 / v.scale} y={hover.y} text={`${fmt(Math.hypot(hover.x - pts[0].x, hover.y - pts[0].y), 1)} m on the plan`} fontSize={11 / v.scale} fill={col} listening={false} />
+      )}
+      {trace === 'building' && drag && hover && (
+        <Rect x={Math.min(drag.x, hover.x)} y={Math.min(drag.y, hover.y)} width={Math.abs(hover.x - drag.x)} height={Math.abs(hover.y - drag.y)} stroke="#b5b5b5" fill="#9a9a9a33" strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
+      )}
+      {trace === 'tree' && hover && <Circle x={hover.x} y={hover.y} radius={2.5} stroke="#5fbf6b" fill="#2f7d3a55" strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />}
+    </>
+  )
 }

@@ -4,10 +4,11 @@ import { SavePoints } from './components/SavePoints'
 import { exportProject } from './lib/export/files'
 import { loadSummary } from './lib/loads'
 import { AppCrash, ErrorBoundary, retryImport, Safe3D } from './components/Safe3D'
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
-import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Trash2, Undo2 } from 'lucide-react'
+import { ThemeButton } from './components/ThemePicker'
+import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Trash2, Undo2, Volume2 } from 'lucide-react'
 import { redo, saveNow, undo, useSave, useStore } from './store'
 import type { Project, Workspace } from './types'
 import { fmt, totals } from './lib/calc'
@@ -17,6 +18,7 @@ import { fetchShare, shareCodeFromPath, useAuth } from './lib/cloud'
 import { AccountButton } from './components/Account'
 import { generateProject, EVENT_TYPES, TEMPLATES, type EventType, type WizardInput } from './lib/templates'
 import { LedWorkspace, newScreen } from './workspaces/Led'
+import { SoundWorkspace } from './workspaces/Sound'
 import { GroundWorkspace } from './workspaces/Ground'
 import { StageWorkspace } from './workspaces/Stage'
 import { TrussWorkspace } from './workspaces/Truss'
@@ -31,8 +33,8 @@ import { Check, Modal, Num, Seg, Sel, Txt } from './components/ui'
 import { Home } from './components/Home'
 import { VenueFinder } from './components/VenueFinder'
 import { Guide } from './components/Guide'
-import { briefToProject, parseBrief } from './lib/smartLayout'
-import { decorPreset, newDecor } from './lib/decor'
+import { aiConfig, planToProject, readBrief, rulePlan } from './lib/brief'
+import { THEMES } from './lib/themes'
 import { useDevice, isCompact, type DevicePref } from './lib/device'
 
 // The 3D engine is large, so it loads only when someone opens a 3D view.
@@ -55,18 +57,31 @@ const TABS: { id: Workspace; label: string; short: string; kicker: string; icon:
   { id: 'set', label: 'Set Design', short: 'Set', kicker: '03', icon: Castle, tip: 'Festival facades: towers, frames, arches, LED, bulb outlines, cut-outs, themes' },
   { id: 'truss', label: 'Truss & Rigging', short: 'Truss', kicker: '04', icon: Spline, tip: 'Truss, hoists, lights and speakers, with live weights' },
   { id: 'led', label: 'LED Screens', short: 'LED', kicker: '05', icon: MonitorPlay, tip: 'Screen sizes, pixels, cabling and power' },
-  { id: 'seating', label: 'Seating', short: 'Seats', kicker: '06', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
-  { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '07', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
+  { id: 'sound', label: 'Sound', short: 'Sound', kicker: '06', icon: Volume2, tip: 'Speakers, coverage map, delay towers, input list and monitor mixes' },
+  { id: 'seating', label: 'Seating', short: 'Seats', kicker: '07', icon: Armchair, tip: 'Tables, chairs, guest list and meals' },
+  { id: 'decor', label: 'Decor & FX', short: 'Decor', kicker: '08', icon: Sparkles, tip: 'Wedding decor, pyro, smoke, sponsor banners, your own 3D models' },
   { id: 'model', label: '3D Model', short: 'Model', kicker: '★', icon: Shapes, tip: 'Blender-style 3D modelling: shapes, spin, extrude, arrays, groups, materials' },
-  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '08', icon: Box, tip: 'See everything in 3D, render images and videos' },
-  { id: 'plan', label: 'Plan', short: 'Plan', kicker: '09', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
-  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '10', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
+  { id: 'viz', label: '3D Visualizer', short: '3D', kicker: '09', icon: Box, tip: 'See everything in 3D, render images and videos' },
+  { id: 'plan', label: 'Plan', short: 'Plan', kicker: '10', icon: ClipboardList, tip: 'Quotation with GST, run of show, crew, stock, permits and client feedback' },
+  { id: 'deliver', label: 'Deliver', short: 'Deliver', kicker: '11', icon: Send, tip: 'Client link, PDF, CAD and spreadsheets' },
 ]
 
-const EDIT_WS = ['ground', 'stage', 'set', 'truss', 'led', 'seating', 'decor']
+const EDIT_WS = ['ground', 'stage', 'set', 'truss', 'led', 'sound', 'seating', 'decor']
 
 // Number keys 1-9 open these, in order (the Model tab is opened by clicking).
 const KEYED = TABS.filter((t) => t.id !== 'model')
+
+// The four steps of a job; every page belongs to one. The top bar shows the steps, and the pages of the current step.
+const STEPS: { id: 'site' | 'build' | 'show' | 'deliver'; label: string; hint: string; tabs: Workspace[] }[] = [
+  { id: 'site', label: 'Site', hint: 'The venue: size, site photo, crowd areas, exits and facilities', tabs: ['ground'] },
+  { id: 'build', label: 'Build', hint: 'Stage, set, truss and lights, LED screens, sound, seating, decor and 3D models', tabs: ['stage', 'set', 'truss', 'led', 'sound', 'seating', 'decor', 'model'] },
+  { id: 'show', label: 'Present', hint: 'See it in 3D, play the show, render images and videos', tabs: ['viz'] },
+  { id: 'deliver', label: 'Deliver', hint: 'Quote, run of show, crew and permits; client link, PDF and files', tabs: ['plan', 'deliver'] },
+]
+const stepOf = (ws: Workspace) => STEPS.find((s) => s.tabs.includes(ws)) ?? STEPS[0]
+// The page last used in each step, so going back to a step returns to it.
+const lastTab: Partial<Record<(typeof STEPS)[number]['id'], Workspace>> = {}
+useStore.subscribe((s) => void (lastTab[stepOf(s.ui.workspace).id] = s.ui.workspace))
 
 export default function App() {
   const [shared] = useState(() => !!readShareHash() || !!shareCodeFromPath())
@@ -162,6 +177,7 @@ function Studio() {
         {ui.workspace === 'stage' && <StageWorkspace />}
         {ui.workspace === 'truss' && <TrussWorkspace />}
         {ui.workspace === 'led' && <LedWorkspace />}
+        {ui.workspace === 'sound' && <SoundWorkspace />}
         {ui.workspace === 'seating' && <SeatingWorkspace />}
         {ui.workspace === 'viz' && (
           <Safe3D onExit={() => useStore.getState().setUI({ workspace: 'ground' })} exitLabel="Back to Ground plan">
@@ -265,6 +281,8 @@ function TopBar() {
   const { setUI, mutate, notify, setProject } = useStore.getState()
   const file = useRef<HTMLInputElement>(null)
   const [menu, setMenu] = useState(false)
+  const [help, setHelp] = useState(false)
+  const [company, setCompany] = useState(false)
   const [points, setPoints] = useState(false)
   const device = useDevice((s) => s.kind)
   const pref = useDevice((s) => s.pref)
@@ -280,21 +298,57 @@ function TopBar() {
       ]}
     />
   )
-  const tabs = (
-    <nav className={`flex items-center gap-0.5 rounded-xl border border-line p-1 ${!desktop ? 'w-max mx-auto' : 'mx-auto min-w-0 max-w-full overflow-x-auto no-scrollbar'}`}>
-      {TABS.map((t) => (
-        <button
-          key={t.id}
-          onClick={() => setUI({ workspace: t.id, tool: 'select' })}
-          title={KEYED.includes(t) ? `${t.tip} (${KEYED.indexOf(t) + 1})` : t.tip}
-          className={`h-8 px-2 2xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
-        >
-          <t.icon size={13} className={ui.workspace === t.id ? '' : 'text-mute'} />
-          <span className={desktop ? 'hidden min-[2100px]:inline' : 'hidden'}>{t.label}</span>
-          <span className={desktop ? 'min-[2100px]:hidden' : ''}>{t.short}</span>
-        </button>
-      ))}
+  const step = stepOf(ui.workspace)
+  const go = (ws: Workspace) => setUI({ workspace: ws, tool: 'select' })
+  // ① Site → ② Build → ③ Present → ④ Deliver: the whole job in four steps, always visible.
+  const steps = (
+    <nav className={`flex items-center gap-1 ${desktop ? 'mx-auto' : 'w-max mx-auto'}`} aria-label="Steps">
+      {STEPS.map((st, i) => {
+        const on = st.id === step.id
+        return (
+          <div key={st.id} className="flex items-center gap-1">
+            {i > 0 && <span className="text-mute text-[10px]" aria-hidden>→</span>}
+            <button
+              onClick={() => go(lastTab[st.id] ?? st.tabs[0])}
+              title={st.hint}
+              aria-current={on ? 'step' : undefined}
+              className={`h-8 pl-1.5 pr-3 rounded-full text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors ${on ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
+            >
+              <span className={`h-5 w-5 rounded-full grid place-items-center text-[10px] font-bold ${on ? 'bg-black text-white' : 'bg-lift text-dim'}`}>{i + 1}</span>
+              {st.label}
+            </button>
+          </div>
+        )
+      })}
     </nav>
+  )
+  // The pages of the current step, each with its name; the active page's purpose is spelled out beside them.
+  const tab = TABS.find((t) => t.id === ui.workspace)
+  const pages = (
+    <div className={`flex items-center gap-2 ${phone ? 'px-2' : 'px-4'} h-10 border-t border-line`}>
+      <nav className="flex items-center gap-0.5 min-w-0 overflow-x-auto no-scrollbar" aria-label={`${step.label} pages`}>
+        {step.tabs.map((id) => {
+          const t = TABS.find((x) => x.id === id)!
+          return (
+            <button
+              key={id}
+              onClick={() => go(id)}
+              title={KEYED.includes(t) ? `${t.tip} (${KEYED.indexOf(t) + 1})` : t.tip}
+              className={`h-7 px-2.5 rounded-lg text-xs whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === id ? 'bg-lift text-white font-medium' : 'text-dim hover:text-white hover:bg-lift'}`}
+            >
+              <t.icon size={13} className={ui.workspace === id ? '' : 'text-mute'} />
+              <span className="hidden xl:inline">{t.label}</span>
+              <span className="xl:hidden">{t.short}</span>
+            </button>
+          )
+        })}
+      </nav>
+      {tab && !phone && <span className="text-[11px] text-mute truncate min-w-0 hidden 2xl:inline">· {tab.tip}</span>}
+      <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        {(step.id === 'build' || step.id === 'show') && <ThemeButton />}
+        {!phone && <div className="w-32" title="Simple shows the essentials; Pro shows every setting">{modeSeg}</div>}
+      </div>
+    </div>
   )
   return (
     <header className="shrink-0 border-b border-line bg-ink" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
@@ -309,19 +363,17 @@ function TopBar() {
         onChange={(e) => mutate((p) => void (p.name = e.target.value))}
         aria-label="Project name"
       />
-      {desktop && tabs}
-      {device === 'tablet' && <div className="flex-1" />}
+      {desktop ? steps : <div className="flex-1" />}
       <div className={`flex items-center gap-1.5 shrink-0 ${phone ? 'ml-auto' : ''}`}>
-        {!phone && <div className="w-36">{modeSeg}</div>}
-        <button className="btn btn-icon" title="Undo (Ctrl+Z)" onClick={undo}>
+        <button className="btn btn-icon" title="Undo (Ctrl+Z)" aria-label="Undo" onClick={undo}>
           <Undo2 size={14} />
         </button>
-        <button className="btn btn-icon" title="Redo (Ctrl+Shift+Z)" onClick={redo}>
+        <button className="btn btn-icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" onClick={redo}>
           <Redo2 size={14} />
         </button>
         <div className="relative">
           {points && <SavePoints onClose={() => setPoints(false)} />}
-          <button className="btn" onClick={() => setMenu(!menu)}>
+          <button className="btn" onClick={() => (setMenu(!menu), setHelp(false))} aria-expanded={menu}>
             {phone ? <MoreHorizontal size={14} /> : <>File <ChevronDown size={12} /></>}
           </button>
           {menu && (
@@ -369,6 +421,24 @@ function TopBar() {
             </div>
           )}
         </div>
+        <div className="relative">
+          <button className="btn" onClick={() => (setHelp(!help), setMenu(false))} aria-expanded={help} title="Guide, shortcuts, light or dark, about">
+            {phone ? <HelpCircle size={14} /> : <>Help <ChevronDown size={12} /></>}
+          </button>
+          {help && (
+            <div className="absolute right-0 top-10 z-40 w-60 card p-1 fade-in" onMouseLeave={() => setHelp(false)}>
+              <MenuItem icon={<HelpCircle size={13} />} label="How this page works" onClick={() => (setUI({ guideOpen: true }), setHelp(false))} />
+              {desktop && <MenuItem icon={<Keyboard size={13} />} label="Keyboard shortcuts" hint="?" onClick={() => (setUI({ shortcutsOpen: true }), setHelp(false))} />}
+              <MenuItem icon={<Info size={13} />} label="About, contact and support" onClick={() => (setCompany(true), setHelp(false))} />
+              <div className="h-px bg-line my-1" />
+              <div className="flex items-center justify-between px-3 h-8 text-xs">
+                Light or dark
+                <ThemeToggle />
+              </div>
+            </div>
+          )}
+          {company && <CompanyPanel onClose={() => setCompany(false)} />}
+        </div>
         <input
           ref={file}
           type="file"
@@ -384,24 +454,10 @@ function TopBar() {
           }}
         />
         <AccountButton />
-        <ThemeToggle />
-        <CompanyButton />
-        {!phone && (
-          <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
-            <HelpCircle size={14} />
-          </button>
-        )}
-        {desktop && (
-          <button className="btn btn-icon" title="Keyboard shortcuts (?)" onClick={() => setUI({ shortcutsOpen: true })}>
-            <Keyboard size={14} />
-          </button>
-        )}
-        {device !== 'tablet' && <button className={`btn btn-primary ${phone ? 'btn-icon' : ''}`} title="Deliver" onClick={() => setUI({ workspace: 'deliver' })}>
-          {phone ? <Send size={14} /> : 'Deliver'}
-        </button>}
       </div>
     </div>
-    {!desktop && <div className="px-2 pb-2 overflow-x-auto hide-scrollbar">{tabs}</div>}
+    {!desktop && <div className="px-2 pb-2 overflow-x-auto no-scrollbar">{steps}</div>}
+    {pages}
     </header>
   )
 }
@@ -577,32 +633,39 @@ function WarningsBar() {
   )
 }
 
-// "Describe your event" → a full starter layout, including decor and effects the brief mentions.
+// "Describe your event" → a full first draft: venue, stage, screens, seating, decor, effects, sound and theme.
 function Brief({ onDone }: { onDone: () => void }) {
   const [text, setText] = useState('')
   const [notes, setNotes] = useState<string[]>([])
-  const go = () => {
-    const { project, notes } = briefToProject(text)
-    const { extras } = parseBrief(text)
-    const want = new Set(extras.decor ?? [])
-    const d = project.decor ?? []
-    if (want.has('mandap')) d.push(newDecor('mandap', project.venue.w / 2, Math.min(project.venue.l - 4, (project.decks.length ? Math.max(...project.decks.map((x) => x.y + x.l)) : 8) + 6)))
-    if (want.has('floral') || want.has('drapes')) d.push(...decorPreset(project, 'wedding-stage'))
-    if (want.has('cold pyro')) d.push(...decorPreset(project, 'pyro-front'))
-    if (want.has('smoke')) d.push(...decorPreset(project, 'smoke-wings'))
-    if (want.has('co2')) d.push(...decorPreset(project, 'co2-row'))
-    if (want.has('fireworks')) d.push(...decorPreset(project, 'fireworks-finale'))
-    if (want.has('confetti')) d.push(newDecor('confetti', project.venue.w / 2 - 4, 4), newDecor('confetti', project.venue.w / 2 + 4, 4))
-    if (want.has('flames')) d.push(newDecor('flame', project.venue.w / 2 - 8, 3), newDecor('flame', project.venue.w / 2 + 8, 3))
-    if (want.has('chandelier')) for (let i = 0; i < 4; i++) d.push(newDecor('chandelier', project.venue.w * (0.2 + i * 0.2), project.venue.l * 0.6))
-    if (want.has('photo booth')) d.push(newDecor('photo-booth', project.venue.w - 4, project.venue.l - 4))
-    project.decor = d
-    useStore.getState().setProject(project)
-    useStore.temporal.getState().clear()
-    setNotes(notes)
-    useStore.getState().notify('Layout built from your description. Check the notes and adjust anything.')
-    onDone()
+  const [busy, setBusy] = useState(false)
+  const preview = useMemo(() => (text.trim().length > 8 ? rulePlan(text) : null), [text])
+  const go = async () => {
+    setBusy(true)
+    try {
+      const { plan, engine } = await readBrief(text)
+      const { project, notes } = planToProject(plan)
+      useStore.getState().setProject(project)
+      useStore.temporal.getState().clear()
+      setNotes(notes)
+      useStore.getState().notify(`First draft built${engine === 'ai' ? ' with AI' : ''}. Check the notes and adjust anything.`)
+      onDone()
+    } finally {
+      setBusy(false)
+    }
   }
+  const chips = preview
+    ? [
+        preview.eventType,
+        `${preview.audience.toLocaleString('en-IN')} guests`,
+        `${preview.venue.w}×${preview.venue.l} m ${preview.venue.outdoor ? 'outdoor' : 'indoor'}`,
+        preview.stage?.w ? `stage ${preview.stage.w}×${preview.stage.l} m` : '',
+        preview.screens ? (preview.screens.center || preview.screens.sides ? [preview.screens.center && 'centre LED', preview.screens.sides && 'side LEDs'].filter(Boolean).join(' + ') : 'no LED') : '',
+        preview.seating ?? '',
+        ...preview.decor,
+        ...preview.effects,
+        preview.theme ? `${THEMES.find((t) => t.id === preview.theme)?.name} theme` : '',
+      ].filter(Boolean)
+    : []
   return (
     <div className="card p-3 glow">
       <div className="label mb-1 flex items-center gap-1.5">
@@ -610,15 +673,24 @@ function Brief({ onDone }: { onDone: () => void }) {
       </div>
       <textarea
         className="field min-h-[72px] py-2"
-        placeholder="e.g. 500 guests sangeet on a lawn, 40x20 ft stage, round tables, 2 side screens, mandap, cold pyro and smoke"
+        placeholder="e.g. 1,500-guest sangeet on a 60×40 lawn, 40×20 ft stage, two LED sides, round tables, cold pyro, royal theme"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && go()}
+        onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && void go()}
       />
-      <button className="btn btn-primary w-full justify-center mt-2" disabled={!text.trim()} onClick={go}>
-        <Sparkles size={13} /> Build it for me
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5" aria-label="What was understood">
+          {chips.map((c) => (
+            <span key={c} className="rounded-full border border-line px-2 py-0.5 text-[10px] text-dim">
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+      <button className="btn btn-primary w-full justify-center mt-2" disabled={!text.trim() || busy} onClick={() => void go()}>
+        <Sparkles size={13} /> {busy ? 'Building…' : 'Build it for me'}
       </button>
-      <p className="text-[10px] text-mute mt-1">Works in English or Hinglish ("500 log ki shaadi, mandap, lawn"). Runs in your browser; nothing is sent anywhere.</p>
+      <p className="text-[10px] text-mute mt-1">English or Hinglish ("500 log ki shaadi, mandap, lawn"). Builds the stage, screens, seating, decor, effects, sound and theme. {aiConfig() ? 'AI reading is on.' : 'Runs in your browser; nothing is sent anywhere.'}</p>
       {notes.length > 0 && <ul className="text-[10px] text-dim mt-1">{notes.map((n, i) => <li key={i}>· {n}</li>)}</ul>}
     </div>
   )
@@ -764,14 +836,3 @@ function useShortcuts() {
 
 
 // Contact details, feedback and company info, kept out of the canvas.
-function CompanyButton() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button className="btn btn-icon" title="Help & company" aria-label="Help and company information" onClick={() => setOpen(true)}>
-        <Info size={14} />
-      </button>
-      {open && <CompanyPanel onClose={() => setOpen(false)} />}
-    </>
-  )
-}
