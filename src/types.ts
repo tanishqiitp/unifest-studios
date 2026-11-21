@@ -230,6 +230,29 @@ export interface QuoteSettings {
   status?: 'draft' | 'sent' | 'approved'
 }
 
+// Show playback: cues on a music timeline (seconds). Lights and screens hold until the next cue on their lane;
+// effects fire for their length.
+export interface ShowCue {
+  id: string
+  lane: 'lights' | 'screens' | 'fx'
+  t: number // start, seconds
+  dur: number // seconds
+  label?: string
+  palette?: string // lights: white, warm, ice, duo, rainbow, red, green
+  move?: 'still' | 'slow' | 'fast'
+  level?: number // 0..1
+  strobe?: boolean
+  color?: string // lights: single colour override; screens: tint colour
+  screen?: 'content' | 'black' | 'flash' | 'tint'
+  fx?: string // cold-pyro, co2-jet, flame, confetti, firework, smoke, bubble, blinder, all
+}
+export interface Show {
+  cues: ShowCue[]
+  length: number // seconds
+  bpm?: number
+  audio?: { id: string; name: string } // music file kept in this browser
+}
+
 export interface Cue {
   id: string
   time: string // HH:MM
@@ -328,6 +351,7 @@ export interface Project {
   brand?: Brand
   quote?: QuoteSettings
   cues?: Cue[]
+  show?: Show // show playback timeline (3D Visualizer)
   crew?: CrewMember[]
   comments?: Comment[]
   approval?: Approval
