@@ -78,13 +78,24 @@ function syncMirrors(p: Project) {
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined
 
+// After an automatic reload to a new version, come back to the same screen instead of the home page.
+const resume = (() => {
+  try {
+    const r = sessionStorage.getItem('unifest:resume')
+    sessionStorage.removeItem('unifest:resume')
+    return r ? (JSON.parse(r) as { workspace: Workspace; mode: Mode }) : null
+  } catch {
+    return null
+  }
+})()
+
 export const useStore = create<State>()(
   temporal(
     (set, get) => ({
       project: loadInitial(),
       ui: {
-        workspace: 'ground',
-        mode: 'simple',
+        workspace: resume?.workspace ?? 'ground',
+        mode: resume?.mode ?? 'simple',
         selection: null,
         extra: [],
         tool: 'select',
@@ -92,7 +103,7 @@ export const useStore = create<State>()(
         overlay: 'none',
         wizardOpen: false,
         shortcutsOpen: false,
-        home: true,
+        home: !resume,
         guideOpen: false,
         venuesOpen: false,
         wizardPrefill: null,

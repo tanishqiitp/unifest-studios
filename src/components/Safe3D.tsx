@@ -1,5 +1,6 @@
-import { Component, createContext, useCallback, useContext, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, createContext, useCallback, useContext, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, ArrowLeft, Download, RotateCcw } from 'lucide-react'
+import { useStore } from '../store'
 
 // ---------------------------------------------------------------- WebGL capability
 
@@ -57,8 +58,9 @@ export function useGlCreated() {
   )
 }
 
-type Kind = 'none' | 'error' | 'lost'
+type Kind = 'none' | 'error' | 'lost' | 'update'
 const TEXT: Record<Kind, [string, string]> = {
+  update: ['A new version is ready', 'Unifest was updated while this page was open. Reload to continue; your project is saved.'],
   none: ['3D is not available here', 'This browser or device could not start 3D graphics. Turn on hardware acceleration in the browser settings, update the graphics driver, or try Chrome or Edge. Your project is safe and every 2D view still works.'],
   error: ['3D view stopped', 'Something went wrong while drawing this 3D view. Your project and edits are safe. Try again, or carry on in 2D.'],
   lost: ['3D view paused', 'The graphics card reset the 3D view (this can happen when memory runs low or the computer wakes from sleep). Your project is safe.'],
@@ -76,7 +78,7 @@ function Fallback({ kind, onRetry, onExit, exitLabel, detail }: { kind: Kind; on
         <div className="flex flex-wrap justify-center gap-2 mt-4">
           {onRetry && (
             <button className="btn btn-primary h-9" onClick={onRetry}>
-              <RotateCcw size={13} /> Try again
+              <RotateCcw size={13} /> {kind === 'update' ? 'Reload' : 'Try again'}
             </button>
           )}
           {onExit && (
@@ -104,11 +106,32 @@ export function Safe3D({ children, onExit, exitLabel }: { children: ReactNode; o
     setAttempt((n) => n + 1)
     force((n) => n + 1)
   }
+  // A graphics reset usually clears on its own: restart the 3D view by itself, twice at most per minute.
+  const autoTries = useRef<number[]>([])
+  useEffect(() => {
+    if (!lost) return
+    const now = Date.now()
+    autoTries.current = autoTries.current.filter((t) => now - t < 60_000)
+    if (autoTries.current.length >= 2) return
+    autoTries.current.push(now)
+    const id = setTimeout(retry, 1500)
+    return () => clearTimeout(id)
+  }, [lost]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!hasWebGL()) return <Fallback kind="none" onRetry={retry} onExit={onExit} exitLabel={exitLabel} />
   if (lost) return <Fallback kind="lost" onRetry={retry} onExit={onExit} exitLabel={exitLabel} />
   return (
     <LostCtx.Provider value={() => setLost(true)}>
-      <ErrorBoundary key={attempt} where="3D" fallback={(err) => <Fallback kind="error" onRetry={retry} onExit={onExit} exitLabel={exitLabel} detail={String(err?.stack ?? err)} />}>
+      <ErrorBoundary
+        key={attempt}
+        where="3D"
+        fallback={(err) =>
+          isStaleCode(err) ? (
+            <Fallback kind="update" onRetry={reloadNow} onExit={onExit} exitLabel={exitLabel} />
+          ) : (
+            <Fallback kind="error" onRetry={retry} onExit={onExit} exitLabel={exitLabel} detail={String(err?.stack ?? err)} />
+          )
+        }
+      >
         {children}
       </ErrorBoundary>
     </LostCtx.Provider>
@@ -164,5 +187,38 @@ export function AppCrash({ onHome }: { onHome?: () => void }) {
  * React caches a failed lazy load, so retrying here is what lets "Try again" work.
  */
 export function retryImport<T>(load: () => Promise<T>, tries = 3): Promise<T> {
-  return load().catch((err) => (tries <= 1 ? Promise.reject(err) : new Promise<T>((res) => setTimeout(() => res(retryImport(load, tries - 1)), 1200))))
+  return load().catch((err) => {
+    if (tries > 1) return new Promise<T>((res) => setTimeout(() => res(retryImport(load, tries - 1)), 800))
+    // A new version went live while this page was open: its old code files are gone. Load the new version
+    // (the project is saved first) instead of showing an error.
+    if (isStaleCode(err) && reloadForUpdate()) return new Promise<T>(() => {})
+    return Promise.reject(err)
+  })
+}
+
+/** The error a browser gives when a code file of an older version is no longer on the server. */
+export const isStaleCode = (e: unknown) => /dynamically imported module|Importing a module script failed|error loading dynamically imported|ChunkLoadError|Unable to preload CSS/i.test(String((e as Error)?.message ?? e))
+
+/** Reload to the latest version, at most once a minute (so a real outage can't cause a reload loop). */
+export function reloadForUpdate(): boolean {
+  try {
+    const last = +(sessionStorage.getItem('unifest:update-reload') || 0)
+    if (Date.now() - last < 60_000) return false
+    sessionStorage.setItem('unifest:update-reload', String(Date.now()))
+  } catch {
+    return false
+  }
+  reloadNow()
+  return true
+}
+
+/** Reload, coming back to the same screen (the store saves the project on page hide). */
+export function reloadNow() {
+  try {
+    const ui = useStore.getState().ui
+    if (!ui.home) sessionStorage.setItem('unifest:resume', JSON.stringify({ workspace: ui.workspace, mode: ui.mode }))
+  } catch {
+    /* private mode: the home page opens instead */
+  }
+  location.reload()
 }
