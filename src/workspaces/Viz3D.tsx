@@ -105,37 +105,9 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const hasShow = !!project.show?.cues.length
   const [viewCmd, setViewCmd] = useState<ViewCmd | null>(null)
   const [angles, setAngles] = useState<Angles>({ az: 0, el: 20 })
-  // No mode switch: drag turns the view; right-drag, Shift-drag or Space-drag moves across the ground.
-  // On touch screens two fingers move, or double-tap and drag with one finger.
-  const [spaceGrab, setSpaceGrab] = useState(false)
-  const [shiftGrab, setShiftGrab] = useState(false)
-  const [tapGrab, setTapGrab] = useState(false)
-  const nav: Nav = spaceGrab || shiftGrab || tapGrab ? 'grab' : 'orbit'
-  const rootRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = rootRef.current
-    if (!el) return
-    let last = { t: 0, x: 0, y: 0 }
-    const down = (e: PointerEvent) => {
-      if (e.pointerType !== 'touch' || !e.isPrimary) return
-      const now = performance.now()
-      if (now - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40) {
-        // Second tap: this drag moves across the ground. Set it before the controls see the touch.
-        if (orbitHandle.c) orbitHandle.c.touches.ONE = THREE.TOUCH.PAN
-        setTapGrab(true)
-        last = { t: 0, x: 0, y: 0 }
-      } else last = { t: now, x: e.clientX, y: e.clientY }
-    }
-    const up = (e: PointerEvent) => e.pointerType === 'touch' && setTapGrab(false)
-    el.addEventListener('pointerdown', down, true)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
-    return () => {
-      el.removeEventListener('pointerdown', down, true)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-    }
-  }, [])
+  // Map-style navigation (like Google Maps 3D): drag grabs the ground; right-drag or Ctrl-drag turns the view.
+  // Touch: one finger grabs, two fingers turn and zoom.
+  const [grabbing, setGrabbing] = useState(false)
   const view = (kind: ViewCmd['kind'], value: ViewCmd['value'] = 0) => {
     setShowcase(false)
     setViewCmd({ kind, value, n: Date.now() + Math.random() })
@@ -186,7 +158,6 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
           if (!e.repeat) (usePlayer.getState().playing ? pause() : play())
           return
         }
-        if (!e.repeat) setSpaceGrab(true)
         return
       }
       if (e.key === 'Home' && usePlayer.getState().open) {
@@ -209,22 +180,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
         setViewCmd({ kind: 'fit', value: 0, n: Date.now() + Math.random() })
       }
     }
-    const up = (e: KeyboardEvent) => {
-      if (e.code === 'Space') setSpaceGrab(false)
-      if (e.key === 'Shift') setShiftGrab(false)
-    }
-    const shift = (e: KeyboardEvent) => e.key === 'Shift' && !typing(e) && setShiftGrab(true)
-    window.addEventListener('keydown', shift)
-    const blur = () => (setSpaceGrab(false), setShiftGrab(false))
     window.addEventListener('keydown', down, true)
-    window.addEventListener('keyup', up, true)
-    window.addEventListener('blur', blur)
-    return () => {
-      window.removeEventListener('keydown', down, true)
-      window.removeEventListener('keyup', up, true)
-      window.removeEventListener('blur', blur)
-      window.removeEventListener('keydown', shift)
-    }
+    return () => window.removeEventListener('keydown', down, true)
   }, [compact])
   const fileRef = useRef<HTMLInputElement>(null)
   const notify = useStore((s) => s.notify)
@@ -247,7 +204,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const bg = look === 'tech' ? '#ededed' : look === 'day' ? '#b9c6d3' : '#000'
 
   return (
-    <div ref={rootRef} className={`relative h-full w-full overflow-hidden ${nav === 'grab' ? 'cursor-grab active:cursor-grabbing' : ''}`} style={{ background: bg }}>
+    <div className={`relative h-full w-full overflow-hidden ${grabbing ? 'cursor-grabbing' : 'cursor-grab'}`} style={{ background: bg }}>
       <Canvas
         onCreated={glCreated}
         shadows={quality === 'best' || (quality === 'show' && !lowPower)}
@@ -279,7 +236,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
           }}
           onShowcaseStop={() => setShowcase(false)}
           viewCmd={viewCmd}
-          nav={nav}
+          onGrab={setGrabbing}
           onContentError={() => {
             changeVideo(null)
             notify('This file cannot be played here. Try an MP4 (H.264) video or a JPG/PNG image.')
@@ -459,7 +416,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
       {!compact && !rec && (
         <div className={`absolute left-4 bottom-4 text-[11px] hidden xl:flex items-center gap-1.5 ${look === 'show' ? 'text-mute' : 'text-black/50'}`}>
           <Eye size={12} />
-          Drag to turn · right-drag or Shift-drag to move · scroll zooms to the pointer · double-click to fly there · W A S D move · F whole ground
+          Drag to move · right-drag or Ctrl-drag to turn · scroll zooms to the pointer · double-click to fly there · W A S D move · F whole ground
         </div>
       )}
 
@@ -489,8 +446,8 @@ const VIEWS = [
   ['back', 'Back'],
 ] as const
 
-// Live handle to the 3D view's camera controls, so a touch gesture can switch to moving before they see it.
-const orbitHandle: { c?: { touches: { ONE?: number; TWO?: number } } } = {}
+// OrbitControls' "no action" value: the left button and one finger are handled by the ground grab instead.
+const NONE = -1
 
 // How to move the view, shown once in the View panel instead of a mode switch.
 function NavHelp() {
@@ -499,11 +456,11 @@ function NavHelp() {
     <div className="text-[10px] text-mute leading-snug px-1" aria-label="How to move the view">
       {touch ? (
         <>
-          <b className="text-dim">One finger</b> turns · <b className="text-dim">two fingers</b> move and zoom · <b className="text-dim">double-tap and drag</b> moves
+          <b className="text-dim">One finger</b> moves · <b className="text-dim">two fingers</b> turn and zoom
         </>
       ) : (
         <>
-          <b className="text-dim">Drag</b> turns · <b className="text-dim">right-drag</b> or <b className="text-dim">Shift-drag</b> moves · scroll zooms
+          <b className="text-dim">Drag</b> moves · <b className="text-dim">right-drag</b> or <b className="text-dim">Ctrl-drag</b> turns · scroll zooms
         </>
       )}
     </div>
@@ -621,7 +578,7 @@ interface SceneProps {
   onRecDone: (ok: boolean) => void
   onShowcaseStop: () => void
   viewCmd: ViewCmd | null
-  nav: Nav
+  onGrab: (on: boolean) => void
   onContentError: () => void
   onAngles: (a: Angles) => void
 }
@@ -647,13 +604,80 @@ function focusOf(project: Project) {
 function Scene(props: SceneProps) {
   const { project, preset, camReq, look, palette, motion, crowd, labels, showcase, video, shotReq, rec, compact, onInfo, dropAt, quality } = props
   const controls = useRef<OrbitImpl>(null)
-  // Shared with the Viewer, so a double-tap can switch this touch to moving before the controls read it.
-  useEffect(() => void (orbitHandle.c = (controls.current as unknown as typeof orbitHandle.c) ?? undefined))
   const { camera, gl, scene, size, setSize, setDpr, viewport } = useThree()
   const f = useMemo(() => focusOf(project), [project])
   const { W, L, sb } = f
   // A camera move in progress: straight to a point, or around the target along a sphere.
   const fly = useRef<{ pos: THREE.Vector3; target: THREE.Vector3; sph?: THREE.Spherical } | null>(null)
+  // Grab the ground: the exact spot under the pointer when you press stays under it as you drag.
+  // Callbacks through a ref, so a re-render in the middle of a drag never resets it.
+  const cb = useRef({ onGrab: props.onGrab, stop: props.onShowcaseStop })
+  cb.current = { onGrab: props.onGrab, stop: props.onShowcaseStop }
+  const grabSpan = Math.max(props.project.venue.w, props.project.venue.l)
+  useEffect(() => {
+    const el = gl.domElement
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const ray = new THREE.Raycaster()
+    const ndc = new THREE.Vector2()
+    const fingers = new Set<number>()
+    let grab: { id: number; g: THREE.Vector3 } | null = null
+    const onPlane = (e: PointerEvent, y: number) => {
+      const r = el.getBoundingClientRect()
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
+      ray.setFromCamera(ndc, camera)
+      plane.constant = -y
+      const p = ray.ray.intersectPlane(plane, new THREE.Vector3())
+      // Near the horizon a tiny move would fling the view across the world: ignore those.
+      return p && p.distanceTo(camera.position) < grabSpan * 4 ? p : null
+    }
+    const end = (id?: number) => {
+      if (grab && (id === undefined || id === grab.id)) {
+        grab = null
+        cb.current.onGrab(false)
+      }
+    }
+    const down = (e: PointerEvent) => {
+      const c = controls.current as unknown as { mouseButtons: { LEFT: number } } | null
+      if (e.pointerType === 'touch') {
+        fingers.add(e.pointerId)
+        // A second finger hands over to turning and zooming.
+        if (fingers.size > 1) return end()
+      } else if (e.button !== 0) return
+      if (c) c.mouseButtons.LEFT = e.ctrlKey || e.metaKey || e.altKey ? THREE.MOUSE.ROTATE : NONE
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const g = onPlane(e, 0)
+      if (!g) return
+      grab = { id: e.pointerId, g }
+      fly.current = null
+      cb.current.stop()
+      cb.current.onGrab(true)
+    }
+    const move = (e: PointerEvent) => {
+      if (!grab || e.pointerId !== grab.id) return
+      const ctl = controls.current
+      const p = onPlane(e, grab.g.y)
+      if (!ctl || !p) return
+      const d = grab.g.clone().sub(p).setY(0)
+      if (d.length() > grabSpan) return
+      camera.position.add(d)
+      ctl.target.add(d)
+      ctl.update()
+    }
+    const up = (e: PointerEvent) => {
+      fingers.delete(e.pointerId)
+      end(e.pointerId)
+    }
+    el.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      el.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [gl, camera, grabSpan])
   const show = look === 'show'
   // ?debug3d in the address exposes the renderer for performance checks.
   useEffect(() => {
@@ -888,8 +912,8 @@ function Scene(props: SceneProps) {
         zoomToCursor
         screenSpacePanning={false}
         panSpeed={1.2}
-        mouseButtons={props.nav === 'grab' ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE } : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
-        touches={props.nav === 'grab' ? { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE } : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+        mouseButtons={{ LEFT: NONE as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }}
+        touches={{ ONE: NONE as THREE.TOUCH, TWO: THREE.TOUCH.DOLLY_ROTATE }}
         onStart={() => {
           fly.current = null
           if (showcase) props.onShowcaseStop()
