@@ -7,10 +7,11 @@ interface Player {
   open: boolean // timeline panel open: the scene follows the show
   playing: boolean
   loop: boolean
+  keys: boolean // the timeline takes the arrow keys
   show?: Show
   set: (p: Partial<Omit<Player, 'set'>>) => void
 }
-export const usePlayer = create<Player>((set) => ({ open: false, playing: false, loop: false, set: (p) => set(p) }))
+export const usePlayer = create<Player>((set) => ({ open: false, playing: false, loop: false, keys: false, set: (p) => set(p) }))
 
 let audio: HTMLAudioElement | null = null
 let startPerf = 0 // timer mode: performance.now() at time 0
