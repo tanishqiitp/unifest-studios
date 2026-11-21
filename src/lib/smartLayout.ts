@@ -26,6 +26,7 @@ const TYPE_RULES: [RegExp, EventType][] = [
   [/comedy|stand-?up/, 'Stand-up Comedy'],
   [/corporate|keynote|conference|launch|town-?hall/, 'Corporate Keynote'],
   [/\bdj\b|edm|party/, 'DJ Night'],
+  [/seated concert|acoustic|unplugged|ghazal|classical|candlelight|qawwali/, 'Seated Concert'],
   [/concert|live|band/, 'Open-Air Concert'],
   [/fest|college/, 'College Fest'],
 ]
@@ -114,7 +115,7 @@ export function parseBrief(text: string): { input: WizardInput; notes: string[];
   if (decor.length) extras.decor = decor
 
   // Venue fallback from audience: seated guests need more floor than standing ones, aspect 3:4
-  const seated = ['Wedding Sangeet', 'Corporate Keynote', 'Fashion Runway', 'Stand-up Comedy'].includes(eventType)
+  const seated = ['Wedding Sangeet', 'Corporate Keynote', 'Fashion Runway', 'Stand-up Comedy', 'Seated Concert'].includes(eventType)
   let [venueW, venueL] = venue ?? [0, 0]
   if (!venue) {
     const area = audience * (seated ? 2.6 : 1.2) // includes stage, FOH, buffet and walkways

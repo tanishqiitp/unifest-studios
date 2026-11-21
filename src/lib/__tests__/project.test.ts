@@ -75,7 +75,8 @@ describe('Exports', () => {
     for (const t of TEMPLATES) {
       const src = generateProject(t)
       const link = shareLink(src)
-      expect(link.length, t.name).toBeLessThan(2900)
+      // A full sound system adds rows of speakers: those links can be longer (signed in, the short link always fits).
+      expect(link.length, t.name).toBeLessThan(t.sound ? 4000 : 2900)
       g.location.hash = link.slice(link.indexOf('#'))
       const back = readShareHash()!
       back.screens.forEach((s, i) => {
@@ -85,6 +86,15 @@ describe('Exports', () => {
         expect(s.z).toBeCloseTo(o.z, 2)
       })
       expect(back.truss.map((x) => x.legs)).toEqual(src.truss.map((x) => x.legs))
+      // Speakers come back the same (positions to the centimetre).
+      expect(back.sound?.sources.length ?? 0).toBe(src.sound?.sources.length ?? 0)
+      back.sound?.sources.forEach((s, i) => {
+        const o = src.sound!.sources[i]
+        expect([s.kind, s.role, s.boxes, s.flown, s.label ?? '']).toEqual([o.kind, o.role, o.boxes, o.flown, o.label ?? ''])
+        expect(s.x).toBeCloseTo(o.x, 1)
+        expect(s.aim).toBeCloseTo(o.aim, 1)
+        expect(s.delay ?? 0).toBeCloseTo(o.delay ?? 0, 1)
+      })
     }
     g.location.hash = ''
   })
