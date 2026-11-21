@@ -1,5 +1,6 @@
 // Sound tab: design the PA on the ground plan, see how loud every part of the crowd will be, and write the
 // input list and monitor mixes for the crew. Everything feeds weight, power, the quote, 3D and the PDF.
+import { KitMenu } from '../components/KitMenu'
 import { useMemo } from 'react'
 import { Circle, Group, Image as KImage, Line, Rect, Text, Wedge } from 'react-konva'
 import { nanoid } from 'nanoid'
@@ -49,6 +50,7 @@ export function SoundWorkspace() {
   return (
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
+        <KitMenu kind="sound" />
         <DesignPanel />
         <SourceList />
       </aside>

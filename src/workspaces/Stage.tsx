@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { KitMenu } from '../components/KitMenu'
 import { CadShell } from '../components/CadShell'
 import { nanoid } from 'nanoid'
 import { Trash2 } from 'lucide-react'
@@ -61,6 +62,7 @@ export function StageWorkspace() {
   return (
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
+        <KitMenu kind="stage" />
         <Section title="Stage builder">
           <Sel label="Deck size" value={size} onChange={setSize} options={DECKS.map((d) => ({ value: d.value, label: d.label }))} tip="Stages are built from standard platform decks clamped together on legs." />
           <div className="grid grid-cols-3 gap-2">

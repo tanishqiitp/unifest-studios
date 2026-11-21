@@ -4,7 +4,7 @@ import { SavePoints } from './components/SavePoints'
 import { exportProject } from './lib/export/files'
 import { loadSummary } from './lib/loads'
 import { AppCrash, ErrorBoundary, retryImport, Safe3D } from './components/Safe3D'
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
 import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Trash2, Undo2, Volume2 } from 'lucide-react'
@@ -32,8 +32,8 @@ import { Check, Modal, Num, Seg, Sel, Txt } from './components/ui'
 import { Home } from './components/Home'
 import { VenueFinder } from './components/VenueFinder'
 import { Guide } from './components/Guide'
-import { briefToProject, parseBrief } from './lib/smartLayout'
-import { decorPreset, newDecor } from './lib/decor'
+import { aiConfig, planToProject, readBrief, rulePlan } from './lib/brief'
+import { THEMES } from './lib/themes'
 import { useDevice, isCompact, type DevicePref } from './lib/device'
 
 // The 3D engine is large, so it loads only when someone opens a 3D view.
@@ -580,32 +580,39 @@ function WarningsBar() {
   )
 }
 
-// "Describe your event" → a full starter layout, including decor and effects the brief mentions.
+// "Describe your event" → a full first draft: venue, stage, screens, seating, decor, effects, sound and theme.
 function Brief({ onDone }: { onDone: () => void }) {
   const [text, setText] = useState('')
   const [notes, setNotes] = useState<string[]>([])
-  const go = () => {
-    const { project, notes } = briefToProject(text)
-    const { extras } = parseBrief(text)
-    const want = new Set(extras.decor ?? [])
-    const d = project.decor ?? []
-    if (want.has('mandap')) d.push(newDecor('mandap', project.venue.w / 2, Math.min(project.venue.l - 4, (project.decks.length ? Math.max(...project.decks.map((x) => x.y + x.l)) : 8) + 6)))
-    if (want.has('floral') || want.has('drapes')) d.push(...decorPreset(project, 'wedding-stage'))
-    if (want.has('cold pyro')) d.push(...decorPreset(project, 'pyro-front'))
-    if (want.has('smoke')) d.push(...decorPreset(project, 'smoke-wings'))
-    if (want.has('co2')) d.push(...decorPreset(project, 'co2-row'))
-    if (want.has('fireworks')) d.push(...decorPreset(project, 'fireworks-finale'))
-    if (want.has('confetti')) d.push(newDecor('confetti', project.venue.w / 2 - 4, 4), newDecor('confetti', project.venue.w / 2 + 4, 4))
-    if (want.has('flames')) d.push(newDecor('flame', project.venue.w / 2 - 8, 3), newDecor('flame', project.venue.w / 2 + 8, 3))
-    if (want.has('chandelier')) for (let i = 0; i < 4; i++) d.push(newDecor('chandelier', project.venue.w * (0.2 + i * 0.2), project.venue.l * 0.6))
-    if (want.has('photo booth')) d.push(newDecor('photo-booth', project.venue.w - 4, project.venue.l - 4))
-    project.decor = d
-    useStore.getState().setProject(project)
-    useStore.temporal.getState().clear()
-    setNotes(notes)
-    useStore.getState().notify('Layout built from your description. Check the notes and adjust anything.')
-    onDone()
+  const [busy, setBusy] = useState(false)
+  const preview = useMemo(() => (text.trim().length > 8 ? rulePlan(text) : null), [text])
+  const go = async () => {
+    setBusy(true)
+    try {
+      const { plan, engine } = await readBrief(text)
+      const { project, notes } = planToProject(plan)
+      useStore.getState().setProject(project)
+      useStore.temporal.getState().clear()
+      setNotes(notes)
+      useStore.getState().notify(`First draft built${engine === 'ai' ? ' with AI' : ''}. Check the notes and adjust anything.`)
+      onDone()
+    } finally {
+      setBusy(false)
+    }
   }
+  const chips = preview
+    ? [
+        preview.eventType,
+        `${preview.audience.toLocaleString('en-IN')} guests`,
+        `${preview.venue.w}×${preview.venue.l} m ${preview.venue.outdoor ? 'outdoor' : 'indoor'}`,
+        preview.stage?.w ? `stage ${preview.stage.w}×${preview.stage.l} m` : '',
+        preview.screens ? (preview.screens.center || preview.screens.sides ? [preview.screens.center && 'centre LED', preview.screens.sides && 'side LEDs'].filter(Boolean).join(' + ') : 'no LED') : '',
+        preview.seating ?? '',
+        ...preview.decor,
+        ...preview.effects,
+        preview.theme ? `${THEMES.find((t) => t.id === preview.theme)?.name} theme` : '',
+      ].filter(Boolean)
+    : []
   return (
     <div className="card p-3 glow">
       <div className="label mb-1 flex items-center gap-1.5">
@@ -613,15 +620,24 @@ function Brief({ onDone }: { onDone: () => void }) {
       </div>
       <textarea
         className="field min-h-[72px] py-2"
-        placeholder="e.g. 500 guests sangeet on a lawn, 40x20 ft stage, round tables, 2 side screens, mandap, cold pyro and smoke"
+        placeholder="e.g. 1,500-guest sangeet on a 60×40 lawn, 40×20 ft stage, two LED sides, round tables, cold pyro, royal theme"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && go()}
+        onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && void go()}
       />
-      <button className="btn btn-primary w-full justify-center mt-2" disabled={!text.trim()} onClick={go}>
-        <Sparkles size={13} /> Build it for me
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5" aria-label="What was understood">
+          {chips.map((c) => (
+            <span key={c} className="rounded-full border border-line px-2 py-0.5 text-[10px] text-dim">
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+      <button className="btn btn-primary w-full justify-center mt-2" disabled={!text.trim() || busy} onClick={() => void go()}>
+        <Sparkles size={13} /> {busy ? 'Building…' : 'Build it for me'}
       </button>
-      <p className="text-[10px] text-mute mt-1">Works in English or Hinglish ("500 log ki shaadi, mandap, lawn"). Runs in your browser; nothing is sent anywhere.</p>
+      <p className="text-[10px] text-mute mt-1">English or Hinglish ("500 log ki shaadi, mandap, lawn"). Builds the stage, screens, seating, decor, effects, sound and theme. {aiConfig() ? 'AI reading is on.' : 'Runs in your browser; nothing is sent anywhere.'}</p>
       {notes.length > 0 && <ul className="text-[10px] text-dim mt-1">{notes.map((n, i) => <li key={i}>· {n}</li>)}</ul>}
     </div>
   )

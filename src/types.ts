@@ -63,6 +63,8 @@ export type GroundKind =
   | 'greenroom'
   | 'washroom'
   | 'food'
+  | 'building'
+  | 'tree'
   | 'label'
 
 export interface GroundItem {
@@ -367,7 +369,7 @@ export interface Project {
   name: string
   eventType: string
   units: Units
-  venue: { w: number; l: number; image?: string; imageScale?: number }
+  venue: { w: number; l: number; image?: string; imageScale?: number; outline?: [number, number][] } // outline: traced plot boundary
   audience: number
   screens: Screen[]
   ground: GroundItem[]
@@ -398,7 +400,7 @@ export interface Project {
   checklist?: ChecklistState
   eventDate?: string // YYYY-MM-DD
   eventDays?: number
-  look?: { haze?: number } // 3D atmosphere
+  look?: { haze?: number; palette?: string; theme?: string } // 3D atmosphere, light colours and theme pack
 }
 
 // ---------- Model workspace: free 3D parts (Blender-style) ----------

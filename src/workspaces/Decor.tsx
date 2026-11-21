@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { KitMenu } from '../components/KitMenu'
+import { ThemePicker } from '../components/ThemePicker'
 import { CadShell } from '../components/CadShell'
 import { Box, Copy, Flame, Image as ImageIcon, Loader2, Palette, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useStore } from '../store'
@@ -65,6 +67,8 @@ export function DecorWorkspace() {
   return (
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
+        <KitMenu kind="decor" />
+        <ThemePicker />
         {DECOR_GROUPS.map((g) => (
           <Section key={g} title={g}>
             <div className="grid grid-cols-2 gap-1.5">

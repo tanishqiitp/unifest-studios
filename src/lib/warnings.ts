@@ -4,7 +4,9 @@ import { findPanel } from './panels'
 import { audienceEstimate } from './capacity'
 import { seatCount } from './seating'
 import type { Selection } from '../store'
-import { fixAutoRig, fixExtendTruss, fixGroundInside, fixScreenGroundStack, fixScreenToStageFloor, fixTableInside, type Fix } from './fixes'
+import { fixAddExits, fixAddFoh, fixAddGenerators, fixAutoRig, fixExtendTruss, fixGroundInside, fixGrowCrowd, fixScreenGroundStack, fixScreenToStageFloor, fixSoundDelays, fixSoundDesign, fixTableInside, type Fix } from './fixes'
+import { coverage, soundWarnings } from './sound'
+import { generatorPlan } from './resources'
 
 export interface Warning {
   level: 'warn' | 'error'
@@ -65,11 +67,11 @@ export function getWarnings(p: Project): Warning[] {
   }
 
   // Ground plan
-  if (!p.ground.some((g) => g.kind === 'exit')) out.push({ level: 'error', text: 'No emergency exit is marked on the ground plan.', fix: 'Add at least two exits.', workspace: 'ground' })
+  if (!p.ground.some((g) => g.kind === 'exit')) out.push({ level: 'error', text: 'No emergency exit is marked on the ground plan.', fix: 'Add at least two exits.', workspace: 'ground', action: fixAddExits })
   const est = audienceEstimate(p)
   for (const i of est.issues) out.push({ level: i.level, text: i.text, fix: i.invalid ? 'Move or resize it inside the venue, or enlarge the venue.' : undefined, workspace: 'ground', target: i.id ? { kind: 'ground', id: i.id } : undefined, action: i.id && i.invalid ? fixGroundInside(i.id) : undefined })
   if (est.status === 'check') out.push({ level: 'warn', text: 'Audience space estimate is unverified until the zone problems above are fixed.', workspace: 'ground' })
-  else if (est.status === 'ok' && p.audience > est.estimate) out.push({ level: 'warn', text: `Expected ${p.audience.toLocaleString('en-IN')} people but the space estimate is about ${est.estimate.toLocaleString('en-IN')}.`, fix: 'Enlarge the crowd or seating areas, or lower the expected attendance.', workspace: 'ground' })
+  else if (est.status === 'ok' && p.audience > est.estimate) out.push({ level: 'warn', text: `Expected ${p.audience.toLocaleString('en-IN')} people but the space estimate is about ${est.estimate.toLocaleString('en-IN')}.`, fix: 'Enlarge the crowd or seating areas, or lower the expected attendance.', workspace: 'ground', action: est.zonePeople > 0 && !est.tableSeats ? fixGrowCrowd(Math.min(2, p.audience / Math.max(1, est.estimate))) : undefined })
   const zoneIds = new Set(est.zones.map((z) => z.id))
   for (const g of p.ground) {
     if (zoneIds.has(g.id)) continue // audience zones are reported by the estimate above
@@ -91,5 +93,42 @@ export function getWarnings(p: Project): Warning[] {
     if (t.x - r < -0.01 || t.y - r < -0.01 || t.x + r > p.venue.w + 0.01 || t.y + r > p.venue.l + 0.01)
       out.push({ level: 'warn', text: `${t.kind === 'row' ? t.label : `Table ${t.label}`} is outside the venue.`, workspace: 'seating', target: { kind: 'table', id: t.id }, action: fixTableInside(t.id) })
   }
+
+  // Crowd safety: exit width for the crowd, and a mixing position.
+  const exits = p.ground.filter((g) => g.kind === 'exit')
+  const exitWidth = exits.reduce((a, g) => a + Math.max(g.w, g.h), 0)
+  const needWidth = Math.ceil(((p.audience || 0) * 1.2) / 250)
+  if (exits.length && p.audience > 0 && exitWidth < needWidth)
+    out.push({ level: 'warn', text: `Exits add up to ${Math.round(exitWidth)} m wide; ${p.audience.toLocaleString('en-IN')} people need about ${needWidth} m (planning guide: 1.2 m per 250 people).`, fix: 'Add or widen exits.', workspace: 'ground', action: fixAddExits })
+  const hasSound = !!p.sound?.sources.length || p.fixtures.some((f) => f.kind === 'line-array' || f.kind === 'sub')
+  if (hasSound && !p.ground.some((g) => g.kind === 'foh') && p.audience >= 300)
+    out.push({ level: 'warn', text: 'There is no FOH (mixing desk) position on the ground plan.', fix: 'Add one on the centre line, about 60% of the way back.', workspace: 'ground', action: fixAddFoh })
+
+  // Sound
+  if (!hasSound && p.audience >= 50 && p.decks.length) out.push({ level: 'warn', text: 'No sound system is planned yet.', fix: 'Auto-design one in the Sound tab.', workspace: 'sound', action: fixSoundDesign })
+  if (p.sound?.sources.length) {
+    for (const w of soundWarnings(p, coverage(p, p.sound)))
+      out.push({
+        level: /can't reach|safety/.test(w) ? 'error' : 'warn',
+        text: w,
+        workspace: 'sound',
+        action: /delay is/.test(w) ? fixSoundDelays : /too quiet|No main|can't reach|headroom/.test(w) ? fixSoundDesign : undefined,
+      })
+  }
+
+  // Power: generators for the planned load.
+  const gen = generatorPlan(p)
+  const onPlan = p.ground.filter((g) => g.kind === 'generator').length
+  if (gen.suggestedKva > 15 && onPlan < gen.sets.length)
+    out.push({ level: 'warn', text: `The load needs about ${gen.suggestedKva} kVA of generators (${gen.sets.join(' + ')} kVA); ${onPlan ? `only ${onPlan}` : 'none'} on the plan.`, fix: 'Place them away from the crowd, with a clear path for fuel and cables.', workspace: 'ground', action: fixAddGenerators(gen.sets.slice(onPlan)) })
+
+  // Permits (India): reminders that point to the permit checklist in the Plan tab.
+  // Each reminder goes away once its item is ticked in the checklist.
+  const ticked = new Set(p.checklist?.done ?? [])
+  const pyro = (p.decor ?? []).some((d) => ['cold-pyro', 'flame', 'firework'].includes(d.kind))
+  if (pyro && !ticked.has('fire-noc')) out.push({ level: 'warn', text: 'Pyro, flames or fireworks need a fire NOC and a licensed operator with approved products.', fix: 'Tick it in the permit checklist (Plan tab); keep 5 m clear of crowd and fabric.', workspace: 'plan' })
+  if (hasSound && !ticked.has('loudspeaker')) out.push({ level: 'warn', text: 'Loudspeakers need police permission and must stop by 10 pm outdoors (Noise Pollution Rules, 2000).', fix: 'Apply early, and plan the show to end on time.', workspace: 'plan' })
+  if (p.audience >= 1000 && !(ticked.has('police') && ticked.has('ambulance'))) out.push({ level: 'warn', text: `A crowd of ${p.audience.toLocaleString('en-IN')} usually needs police and traffic permission, and an ambulance on site.`, fix: 'See the permit checklist in the Plan tab.', workspace: 'plan' })
+  if (gen.suggestedKva > 125 && !ticked.has('ceig')) out.push({ level: 'warn', text: `Generators of ${gen.suggestedKva} kVA usually need the electrical inspector's approval and a licensed electrician.`, fix: 'Add it to the permit checklist.', workspace: 'plan' })
   return out
 }

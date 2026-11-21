@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { KitMenu } from '../components/KitMenu'
 import { CadShell } from '../components/CadShell'
 import { Group, Line, Rect, Shape, Text } from 'react-konva'
 import type Konva from 'konva'
@@ -446,6 +447,7 @@ function LeftPanel({ project, selId }: { project: Project; selId?: string }) {
   ]
   return (
     <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
+      <KitMenu kind="screens" />
       <Section title={`Screens · ${project.screens.length}`}>
         <div className="space-y-1">
           {project.screens.map((s) => {

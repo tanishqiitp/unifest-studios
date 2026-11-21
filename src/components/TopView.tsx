@@ -23,6 +23,8 @@ export const GROUND_STYLE: Record<GroundItem['kind'], { fill: string; stroke: st
   greenroom: { fill: '#ffffff10', stroke: '#6b6b6b', name: 'Green room', tip: 'Artist waiting area backstage.' },
   washroom: { fill: '#ffffff10', stroke: '#6b6b6b', name: 'Washrooms', tip: 'Toilets.' },
   food: { fill: '#ffffff10', stroke: '#6b6b6b', name: 'Food court', tip: 'Food and beverage stalls.' },
+  building: { fill: '#9a9a9a33', stroke: '#b5b5b5', name: 'Building', tip: 'An existing building, wall or structure on the site. Keep the stage, crowd and exits clear of it.' },
+  tree: { fill: '#2f7d3a55', stroke: '#5fbf6b', name: 'Tree', tip: 'A tree on the site: plan around it (and keep pyro and flames well away).' },
   label: { fill: '#00000000', stroke: '#3f3f3f', name: 'Label', tip: 'Free text note.' },
 }
 
@@ -37,6 +39,12 @@ export function TopView({ edit, sightlines = false, extra }: { edit: Edit; sight
       <Rect x={0} y={0} width={p.venue.w} height={p.venue.l} stroke="#ffffff" strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
       <Text x={0} y={-18 / v.scale} text={`VENUE ${fmt(p.venue.w, 1)} × ${fmt(p.venue.l, 1)} m`} fontSize={11 / v.scale} fill="#8a8a8a" fontFamily="JetBrains Mono" listening={false} />
       <Line points={[p.venue.w / 2, 0, p.venue.w / 2, p.venue.l]} stroke="#fff" opacity={0.12} dash={[6, 6]} strokeWidth={1} strokeScaleEnabled={false} listening={false} />
+      {p.venue.outline && p.venue.outline.length > 2 && (
+        <>
+          <Line points={p.venue.outline.flat()} closed stroke="#fbbf24" strokeWidth={2} dash={[8, 5]} strokeScaleEnabled={false} fill="#fbbf2410" listening={false} />
+          <Text x={p.venue.outline[0][0]} y={p.venue.outline[0][1] - 16 / v.scale} text="PLOT BOUNDARY" fontSize={10 / v.scale} fill="#fbbf24" fontFamily="JetBrains Mono" listening={false} />
+        </>
+      )}
       {p.ground.map((g) => (
         <GroundNode key={g.id} g={g} editable={edit === 'ground'} />
       ))}

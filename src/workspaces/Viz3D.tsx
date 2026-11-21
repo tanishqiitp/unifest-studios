@@ -67,7 +67,10 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const [preset, setPreset] = useState<Preset>('audience')
   const [camReq, setCamReq] = useState(0)
   const [look, setLook] = useState<Look>('show')
-  const [palette, setPalette] = useState<Palette>('duo')
+  // A theme pack sets the light colours; the buttons below can still change them for this view.
+  const themed = project.look?.palette as Palette | undefined
+  const [palette, setPalette] = useState<Palette>(themed ?? 'duo')
+  useEffect(() => void (themed && setPalette(themed)), [themed])
   // Reduced-motion users start with still lights and no auto-orbit; both can be switched on.
   const calm = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
   const [motion, setMotion] = useState(!calm)
@@ -1604,6 +1607,29 @@ function GroundItemMesh({ g, base, tent, tech }: { g: GroundItem; base: string; 
           </mesh>
         </>
       )
+    case 'building':
+      return (
+        <mesh position={[0, 3.5, 0]} castShadow receiveShadow>
+          <boxGeometry args={[w, 7, h]} />
+          <meshStandardMaterial color={tech ? '#d6d6d6' : '#8b8378'} roughness={0.9} />
+          {tech && <Edges color="#777" />}
+        </mesh>
+      )
+    case 'tree': {
+      const r = Math.max(1, Math.min(w, h) / 2)
+      return (
+        <>
+          <mesh position={[0, 1.6, 0]} castShadow>
+            <cylinderGeometry args={[r * 0.08, r * 0.12, 3.2, 8]} />
+            <meshStandardMaterial color="#5a3d26" roughness={1} />
+          </mesh>
+          <mesh position={[0, 3.2 + r * 0.7, 0]} castShadow>
+            <icosahedronGeometry args={[r, 1]} />
+            <meshStandardMaterial color={tech ? '#cfe3cf' : '#2f6b3a'} roughness={0.9} flatShading />
+          </mesh>
+        </>
+      )
+    }
     case 'camera':
       return (
         <mesh position={[0, 0.6, 0]} castShadow receiveShadow>

@@ -3,6 +3,8 @@
 import type { Project, Screen } from '../types'
 import { autoRig, screenSize, stageBounds } from './calc'
 import { findPanel } from './panels'
+import { nanoid } from 'nanoid'
+import { audienceAreas, autoDesign, delayFor, stageFront } from './sound'
 
 export interface Fix {
   label: string
@@ -169,3 +171,70 @@ export function stageKey(p: Project) {
   const sb = stageBounds(p)
   return sb ? `${r2(sb.x)}:${r2(sb.w)}:${r2(sb.y)}:${r2(sb.l)}` : ''
 }
+
+// ---------------------------------------------------------------- sound, power, crowd
+
+/** Design (or redesign) the sound system, keeping the event type, input list and monitor mixes. */
+export const fixSoundDesign: Fix = {
+  label: 'Auto-design sound',
+  apply: (p) => {
+    const keep = p.sound
+    p.sound = { ...autoDesign(p, keep), inputs: keep?.inputs, mixes: keep?.mixes }
+    p.fixtures = p.fixtures.filter((f) => f.kind !== 'line-array' && f.kind !== 'sub')
+  },
+}
+
+/** Put every fill and delay speaker back on the delay its position needs. */
+export const fixSoundDelays: Fix = {
+  label: 'Recalculate delays',
+  apply: (p) => {
+    if (!p.sound) return
+    for (const s of p.sound.sources) if (s.role === 'delay' || s.role === 'fill') (s.delay = delayFor(p.sound, s)), (s.manualDelay = false)
+  },
+}
+
+const ground = (p: Project, kind: Project['ground'][number]['kind'], x: number, y: number, w: number, h: number, label: string) =>
+  p.ground.push({ id: nanoid(8), kind, x: r2(Math.max(0, Math.min(p.venue.w - w, x))), y: r2(Math.max(0, Math.min(p.venue.l - h, y))), w, h, rotation: 0, label })
+
+/** Emergency exits on both sides near the back and in the back wall, sized for the crowd (about 1.2 m per 250 people). */
+export const fixAddExits: Fix = {
+  label: 'Add exits',
+  apply: (p) => {
+    const have = p.ground.filter((g) => g.kind === 'exit').reduce((a, g) => a + Math.max(g.w, g.h), 0)
+    const need = Math.max(0, ((p.audience || 300) * 1.2) / 250 - have)
+    const each = Math.max(3, Math.ceil(need / 3))
+    const L = p.venue.l
+    ground(p, 'exit', 0, L * 0.55, 1, each, 'Exit left')
+    ground(p, 'exit', p.venue.w - 1, L * 0.55, 1, each, 'Exit right')
+    ground(p, 'exit', p.venue.w / 2 - each / 2, L - 1, each, 1, 'Exit rear')
+  },
+}
+
+/** A front-of-house mixing position on the centre line, about 60% of the way back through the crowd. */
+export const fixAddFoh: Fix = {
+  label: 'Add FOH',
+  apply: (p) => {
+    const sb = stageBounds(p)
+    const front = stageFront(p) ?? (sb ? sb.y + sb.l : p.venue.l * 0.2)
+    const back = Math.max(...audienceAreas(p).map((a) => a.y + a.h))
+    const cx = sb ? sb.x + sb.w / 2 : p.venue.w / 2
+    ground(p, 'foh', cx - 2.5, Math.min(front + 32, front + (back - front) * 0.6), 5, 4, 'FOH')
+  },
+}
+
+/** Generators at the back corner, away from the crowd: the sets the power plan suggests. */
+export const fixAddGenerators = (sets: number[]): Fix => ({
+  label: `Add generator${sets.length > 1 ? 's' : ''}`,
+  apply: (p) => sets.forEach((kva, i) => ground(p, 'generator', p.venue.w - 6 - i * 6, 0.5, 5, 3, `Generator ${kva} kVA`)),
+})
+
+/** Make the standing and seating areas deeper (within the venue) so they hold the expected crowd. */
+export const fixGrowCrowd = (factor: number): Fix => ({
+  label: 'Enlarge crowd area',
+  apply: (p) => {
+    for (const g of p.ground) {
+      if (g.kind !== 'crowd' && g.kind !== 'seating' && g.kind !== 'vip') continue
+      g.h = r2(Math.max(g.h, Math.min(p.venue.l - g.y - 1, g.h * factor)))
+    }
+  },
+})

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { KitMenu } from '../components/KitMenu'
 import { CadShell } from '../components/CadShell'
 import { Line } from 'react-konva'
 import { nanoid } from 'nanoid'
@@ -52,6 +53,7 @@ export function TrussWorkspace() {
   return (
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
+        <KitMenu kind="truss" />
         <Section title="Draw truss">
           <Sel label="Truss type" value={type} onChange={setType} options={(Object.keys(TRUSS_INFO) as TrussType[]).map((k) => ({ value: k, label: TRUSS_INFO[k].name }))} tip="Box truss is the square aluminium beam used to hang screens and lights. Bigger = stronger." />
           <Num label="Trim height" value={height} onChange={setHeight} unit="m" step={0.5} min={2} max={20} tip="Height of the truss above the ground." />

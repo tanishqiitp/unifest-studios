@@ -1,4 +1,6 @@
 import { retryImport, Safe3D } from '../components/Safe3D'
+import { KitMenu } from '../components/KitMenu'
+import { ThemePicker } from '../components/ThemePicker'
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { real } from '../lib/theme'
 import { Arc, Arrow, Circle, Ellipse, Group, Image as KImage, Line, Rect, Text, Transformer } from 'react-konva'
@@ -57,6 +59,8 @@ export function SetDesignWorkspace() {
   return (
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
+        <KitMenu kind="set" />
+        <ThemePicker />
         <Section title="Start from a kit">
           <div className="grid gap-1.5">
             {KITS.map((k) => (
