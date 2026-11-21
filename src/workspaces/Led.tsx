@@ -77,7 +77,7 @@ export function LedWorkspace() {
             <ScreenNode key={s.id} s={s} project={project} selected={sel?.id === s.id} />
           ))}
         </PlanCanvas>
-        {sb == null && project.screens.length > 0 && <div className="absolute left-4 bottom-4 text-[11px] text-mute">Front view. Floor = 0 m. Curved screens are shown unrolled.</div>}
+        {sb == null && project.screens.length > 0 && <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden xl:block max-w-[45%]">Front view. Floor = 0 m. Curved screens are shown unrolled.</div>}
       </CadShell>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {sel ? (
@@ -447,7 +447,6 @@ function LeftPanel({ project, selId }: { project: Project; selId?: string }) {
   ]
   return (
     <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
-      <KitMenu kind="screens" />
       <Section title={`Screens · ${project.screens.length}`}>
         <div className="space-y-1">
           {project.screens.map((s) => {
@@ -495,6 +494,7 @@ function LeftPanel({ project, selId }: { project: Project; selId?: string }) {
         </div>
       </Section>
       {mode === 'simple' ? <SizeHelper /> : <PanelLibrary />}
+    <KitMenu kind="screens" />
     </aside>
   )
 }

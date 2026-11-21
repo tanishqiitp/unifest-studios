@@ -7,6 +7,7 @@ import { AppCrash, ErrorBoundary, retryImport, Safe3D } from './components/Safe3
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
+import { ThemeButton } from './components/ThemePicker'
 import { Info, Shapes, AlertTriangle, Armchair, Castle, ClipboardList, Sparkles, Box, ChevronDown, Map as MapIcon, MonitorPlay, Send, Spline, Square, Copy, FolderOpen, HelpCircle, History, Home as HomeIcon, Keyboard, Magnet, PanelLeft, PanelRight, MoreHorizontal, MousePointer2, Hand, Plus, Redo2, Ruler, Save, Trash2, Undo2, Volume2 } from 'lucide-react'
 import { redo, saveNow, undo, useSave, useStore } from './store'
 import type { Project, Workspace } from './types'
@@ -69,6 +70,18 @@ const EDIT_WS = ['ground', 'stage', 'set', 'truss', 'led', 'sound', 'seating', '
 
 // Number keys 1-9 open these, in order (the Model tab is opened by clicking).
 const KEYED = TABS.filter((t) => t.id !== 'model')
+
+// The four steps of a job; every page belongs to one. The top bar shows the steps, and the pages of the current step.
+const STEPS: { id: 'site' | 'build' | 'show' | 'deliver'; label: string; hint: string; tabs: Workspace[] }[] = [
+  { id: 'site', label: 'Site', hint: 'The venue: size, site photo, crowd areas, exits and facilities', tabs: ['ground'] },
+  { id: 'build', label: 'Build', hint: 'Stage, set, truss and lights, LED screens, sound, seating, decor and 3D models', tabs: ['stage', 'set', 'truss', 'led', 'sound', 'seating', 'decor', 'model'] },
+  { id: 'show', label: 'Present', hint: 'See it in 3D, play the show, render images and videos', tabs: ['viz'] },
+  { id: 'deliver', label: 'Deliver', hint: 'Quote, run of show, crew and permits; client link, PDF and files', tabs: ['plan', 'deliver'] },
+]
+const stepOf = (ws: Workspace) => STEPS.find((s) => s.tabs.includes(ws)) ?? STEPS[0]
+// The page last used in each step, so going back to a step returns to it.
+const lastTab: Partial<Record<(typeof STEPS)[number]['id'], Workspace>> = {}
+useStore.subscribe((s) => void (lastTab[stepOf(s.ui.workspace).id] = s.ui.workspace))
 
 export default function App() {
   const [shared] = useState(() => !!readShareHash() || !!shareCodeFromPath())
@@ -268,6 +281,8 @@ function TopBar() {
   const { setUI, mutate, notify, setProject } = useStore.getState()
   const file = useRef<HTMLInputElement>(null)
   const [menu, setMenu] = useState(false)
+  const [help, setHelp] = useState(false)
+  const [company, setCompany] = useState(false)
   const [points, setPoints] = useState(false)
   const device = useDevice((s) => s.kind)
   const pref = useDevice((s) => s.pref)
@@ -283,21 +298,57 @@ function TopBar() {
       ]}
     />
   )
-  const tabs = (
-    <nav className={`flex items-center gap-0.5 rounded-xl border border-line p-1 ${!desktop ? 'w-max mx-auto' : 'mx-auto min-w-0 max-w-full overflow-x-auto no-scrollbar'}`}>
-      {TABS.map((t) => (
-        <button
-          key={t.id}
-          onClick={() => setUI({ workspace: t.id, tool: 'select' })}
-          title={KEYED.includes(t) ? `${t.tip} (${KEYED.indexOf(t) + 1})` : t.tip}
-          className={`h-8 px-2 2xl:px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === t.id ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
-        >
-          <t.icon size={13} className={ui.workspace === t.id ? '' : 'text-mute'} />
-          <span className={desktop ? 'hidden min-[2100px]:inline' : 'hidden'}>{t.label}</span>
-          <span className={desktop ? 'min-[2100px]:hidden' : ''}>{t.short}</span>
-        </button>
-      ))}
+  const step = stepOf(ui.workspace)
+  const go = (ws: Workspace) => setUI({ workspace: ws, tool: 'select' })
+  // ① Site → ② Build → ③ Present → ④ Deliver: the whole job in four steps, always visible.
+  const steps = (
+    <nav className={`flex items-center gap-1 ${desktop ? 'mx-auto' : 'w-max mx-auto'}`} aria-label="Steps">
+      {STEPS.map((st, i) => {
+        const on = st.id === step.id
+        return (
+          <div key={st.id} className="flex items-center gap-1">
+            {i > 0 && <span className="text-mute text-[10px]" aria-hidden>→</span>}
+            <button
+              onClick={() => go(lastTab[st.id] ?? st.tabs[0])}
+              title={st.hint}
+              aria-current={on ? 'step' : undefined}
+              className={`h-8 pl-1.5 pr-3 rounded-full text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors ${on ? 'bg-white text-black' : 'text-dim hover:text-white hover:bg-lift'}`}
+            >
+              <span className={`h-5 w-5 rounded-full grid place-items-center text-[10px] font-bold ${on ? 'bg-black text-white' : 'bg-lift text-dim'}`}>{i + 1}</span>
+              {st.label}
+            </button>
+          </div>
+        )
+      })}
     </nav>
+  )
+  // The pages of the current step, each with its name; the active page's purpose is spelled out beside them.
+  const tab = TABS.find((t) => t.id === ui.workspace)
+  const pages = (
+    <div className={`flex items-center gap-2 ${phone ? 'px-2' : 'px-4'} h-10 border-t border-line`}>
+      <nav className="flex items-center gap-0.5 min-w-0 overflow-x-auto no-scrollbar" aria-label={`${step.label} pages`}>
+        {step.tabs.map((id) => {
+          const t = TABS.find((x) => x.id === id)!
+          return (
+            <button
+              key={id}
+              onClick={() => go(id)}
+              title={KEYED.includes(t) ? `${t.tip} (${KEYED.indexOf(t) + 1})` : t.tip}
+              className={`h-7 px-2.5 rounded-lg text-xs whitespace-nowrap transition-colors flex items-center gap-1.5 ${ui.workspace === id ? 'bg-lift text-white font-medium' : 'text-dim hover:text-white hover:bg-lift'}`}
+            >
+              <t.icon size={13} className={ui.workspace === id ? '' : 'text-mute'} />
+              <span className="hidden xl:inline">{t.label}</span>
+              <span className="xl:hidden">{t.short}</span>
+            </button>
+          )
+        })}
+      </nav>
+      {tab && !phone && <span className="text-[11px] text-mute truncate min-w-0 hidden 2xl:inline">· {tab.tip}</span>}
+      <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        {(step.id === 'build' || step.id === 'show') && <ThemeButton />}
+        {!phone && <div className="w-32" title="Simple shows the essentials; Pro shows every setting">{modeSeg}</div>}
+      </div>
+    </div>
   )
   return (
     <header className="shrink-0 border-b border-line bg-ink" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
@@ -312,19 +363,17 @@ function TopBar() {
         onChange={(e) => mutate((p) => void (p.name = e.target.value))}
         aria-label="Project name"
       />
-      {desktop && tabs}
-      {device === 'tablet' && <div className="flex-1" />}
+      {desktop ? steps : <div className="flex-1" />}
       <div className={`flex items-center gap-1.5 shrink-0 ${phone ? 'ml-auto' : ''}`}>
-        {!phone && <div className="w-36">{modeSeg}</div>}
-        <button className="btn btn-icon" title="Undo (Ctrl+Z)" onClick={undo}>
+        <button className="btn btn-icon" title="Undo (Ctrl+Z)" aria-label="Undo" onClick={undo}>
           <Undo2 size={14} />
         </button>
-        <button className="btn btn-icon" title="Redo (Ctrl+Shift+Z)" onClick={redo}>
+        <button className="btn btn-icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" onClick={redo}>
           <Redo2 size={14} />
         </button>
         <div className="relative">
           {points && <SavePoints onClose={() => setPoints(false)} />}
-          <button className="btn" onClick={() => setMenu(!menu)}>
+          <button className="btn" onClick={() => (setMenu(!menu), setHelp(false))} aria-expanded={menu}>
             {phone ? <MoreHorizontal size={14} /> : <>File <ChevronDown size={12} /></>}
           </button>
           {menu && (
@@ -372,6 +421,24 @@ function TopBar() {
             </div>
           )}
         </div>
+        <div className="relative">
+          <button className="btn" onClick={() => (setHelp(!help), setMenu(false))} aria-expanded={help} title="Guide, shortcuts, light or dark, about">
+            {phone ? <HelpCircle size={14} /> : <>Help <ChevronDown size={12} /></>}
+          </button>
+          {help && (
+            <div className="absolute right-0 top-10 z-40 w-60 card p-1 fade-in" onMouseLeave={() => setHelp(false)}>
+              <MenuItem icon={<HelpCircle size={13} />} label="How this page works" onClick={() => (setUI({ guideOpen: true }), setHelp(false))} />
+              {desktop && <MenuItem icon={<Keyboard size={13} />} label="Keyboard shortcuts" hint="?" onClick={() => (setUI({ shortcutsOpen: true }), setHelp(false))} />}
+              <MenuItem icon={<Info size={13} />} label="About, contact and support" onClick={() => (setCompany(true), setHelp(false))} />
+              <div className="h-px bg-line my-1" />
+              <div className="flex items-center justify-between px-3 h-8 text-xs">
+                Light or dark
+                <ThemeToggle />
+              </div>
+            </div>
+          )}
+          {company && <CompanyPanel onClose={() => setCompany(false)} />}
+        </div>
         <input
           ref={file}
           type="file"
@@ -387,24 +454,10 @@ function TopBar() {
           }}
         />
         <AccountButton />
-        <ThemeToggle />
-        <CompanyButton />
-        {!phone && (
-          <button className="btn btn-icon" title="Show the guide for this workspace" onClick={() => setUI({ guideOpen: true })}>
-            <HelpCircle size={14} />
-          </button>
-        )}
-        {desktop && (
-          <button className="btn btn-icon" title="Keyboard shortcuts (?)" onClick={() => setUI({ shortcutsOpen: true })}>
-            <Keyboard size={14} />
-          </button>
-        )}
-        {device !== 'tablet' && <button className={`btn btn-primary ${phone ? 'btn-icon' : ''}`} title="Deliver" onClick={() => setUI({ workspace: 'deliver' })}>
-          {phone ? <Send size={14} /> : 'Deliver'}
-        </button>}
       </div>
     </div>
-    {!desktop && <div className="px-2 pb-2 overflow-x-auto hide-scrollbar">{tabs}</div>}
+    {!desktop && <div className="px-2 pb-2 overflow-x-auto no-scrollbar">{steps}</div>}
+    {pages}
     </header>
   )
 }
@@ -783,14 +836,3 @@ function useShortcuts() {
 
 
 // Contact details, feedback and company info, kept out of the canvas.
-function CompanyButton() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button className="btn btn-icon" title="Help & company" aria-label="Help and company information" onClick={() => setOpen(true)}>
-        <Info size={14} />
-      </button>
-      {open && <CompanyPanel onClose={() => setOpen(false)} />}
-    </>
-  )
-}

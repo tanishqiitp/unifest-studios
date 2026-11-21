@@ -37,7 +37,7 @@ export function KitMenu({ kind }: { kind: KitKind }) {
     notify(`${mode === 'replace' ? 'Replaced with' : 'Added'} “${k.name}”. Ctrl+Z undoes it.`)
   }
   return (
-    <div className="border-b border-line px-4 py-2.5">
+    <div className="sticky bottom-0 z-10 border-t border-line bg-panel px-4 py-2.5 mt-2">
       <div className="flex items-center gap-1.5">
         <button className="flex items-center gap-1.5 text-[11px] font-medium flex-1 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
           <Briefcase size={12} /> My kit {items.length ? <span className="text-mute">({items.length})</span> : null}
@@ -47,7 +47,7 @@ export function KitMenu({ kind }: { kind: KitKind }) {
         </button>
       </div>
       {open && (
-        <div className="mt-2 space-y-1.5">
+        <div className="mt-2 space-y-1.5 max-h-[40vh] overflow-y-auto">
           {!items.length && <p className="text-[10px] text-mute">Save your favourite {KIT_KINDS[kind].toLowerCase()} once, then drop it into any event, placed at the front of its stage.</p>}
           {items.map((k) => (
             <div key={k.id} className="rounded-lg border border-line p-2">

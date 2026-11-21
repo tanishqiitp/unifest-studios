@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { KitMenu } from '../components/KitMenu'
-import { ThemePicker } from '../components/ThemePicker'
 import { CadShell } from '../components/CadShell'
 import { Box, Copy, Flame, Image as ImageIcon, Loader2, Palette, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useStore } from '../store'
@@ -67,8 +66,6 @@ export function DecorWorkspace() {
   return (
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
-        <KitMenu kind="decor" />
-        <ThemePicker />
         {DECOR_GROUPS.map((g) => (
           <Section key={g} title={g}>
             <div className="grid grid-cols-2 gap-1.5">
@@ -106,6 +103,7 @@ export function DecorWorkspace() {
         </Section>
         <ModelImport />
         <BrandKit />
+      <KitMenu kind="decor" />
       </aside>
 
       <CadShell ws="decor" home="top">
@@ -116,7 +114,7 @@ export function DecorWorkspace() {
         >
           <TopView edit="decor" />
         </PlanCanvas>
-        <div className="absolute left-4 bottom-4 text-[11px] text-mute">Top view · drag to move · handles to resize and rotate · ● effect with its safety ring · see it all in 3D</div>
+        <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden xl:block max-w-[45%]">Top view · drag to move · handles to resize and rotate · ● effect with its safety ring · see it all in 3D</div>
       </CadShell>
 
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">

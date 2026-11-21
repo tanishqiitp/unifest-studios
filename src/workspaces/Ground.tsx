@@ -216,7 +216,7 @@ export function GroundWorkspace() {
           <TopView edit={trace ? 'sound' : 'ground'} sightlines={sight} />
           {trace && <TraceOverlay trace={trace} pts={pts} hover={hover} drag={drag} />}
         </PlanCanvas>
-        <div className="absolute left-4 bottom-4 text-[11px] text-mute">Top view · stage at the top · drag to move, handles to resize · double-click a screen to edit it</div>
+        <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden xl:block max-w-[45%]">Top view · stage at the top · drag to move, handles to resize · double-click a screen to edit it</div>
       </div>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">
         {item ? (

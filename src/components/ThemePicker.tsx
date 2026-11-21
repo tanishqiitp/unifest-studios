@@ -1,13 +1,13 @@
 // One-click theme packs: restyle the set, decor, stage, truss, lights and LED content together.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Palette, Check as Tick } from 'lucide-react'
 import { useStore } from '../store'
 import { applyTheme, THEMES } from '../lib/themes'
 import { Section } from './ui'
 
-export function ThemePicker() {
+export function ThemePicker({ startOpen = false }: { startOpen?: boolean }) {
   const current = useStore((s) => s.project.look?.theme)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(startOpen)
   const [screens, setScreens] = useState(true)
   const pick = (id: string) => {
     useStore.getState().mutate((p) => applyTheme(p, id, { screens }))
@@ -49,5 +49,40 @@ export function ThemePicker() {
         </>
       )}
     </Section>
+  )
+}
+
+/** Theme as one button in the page bar (the theme styles the whole design, so it lives with the pages). */
+export function ThemeButton() {
+  const current = useStore((s) => s.project.look?.theme)
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent) => box.current && !box.current.contains(e.target as Node) && setOpen(false)
+    window.addEventListener('pointerdown', away)
+    return () => window.removeEventListener('pointerdown', away)
+  }, [open])
+  const cur = THEMES.find((t) => t.id === current)
+  return (
+    <div className="relative" ref={box}>
+      <button className={`btn h-7 text-[11px] ${open ? 'btn-on' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open} title="Restyle the whole design at once: set, decor, stage, truss, light colours and LED content">
+        {cur ? (
+          <span className="flex">
+            {cur.swatch.map((c) => (
+              <span key={c} className="h-3 w-3 rounded-full -ml-0.5 first:ml-0 border border-black/40" style={{ background: c }} />
+            ))}
+          </span>
+        ) : (
+          <Palette size={12} />
+        )}
+        <span className="hidden sm:inline">{cur ? cur.name : 'Theme'}</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-9 z-40 w-80 max-h-[70vh] overflow-y-auto card fade-in">
+          <ThemePicker startOpen />
+        </div>
+      )}
+    </div>
   )
 }

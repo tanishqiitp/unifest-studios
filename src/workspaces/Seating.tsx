@@ -46,7 +46,7 @@ export function SeatingWorkspace() {
         <PlanCanvas bounds={{ x: -2, y: -2, w: project.venue.w + 4, h: project.venue.l + 4 }} grid={{ x: 0, y: 0, w: project.venue.w, h: project.venue.l }} onBackground={() => select(null)}>
           <TopView edit="seating" />
         </PlanCanvas>
-        <div className="absolute left-4 bottom-4 text-[11px] text-mute">Drag tables to move · rotate with the round handle · filled chairs have a guest</div>
+        <div className="absolute left-4 bottom-4 text-[11px] text-mute pointer-events-none hidden xl:block max-w-[45%]">Drag tables to move · rotate with the round handle · filled chairs have a guest</div>
       </div>
       <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-y-auto">{table ? <TablePanel t={table} /> : <GuestsPanel />}</aside>
     </div>

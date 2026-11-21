@@ -50,9 +50,9 @@ export function SoundWorkspace() {
   return (
     <div className="flex h-full">
       <aside className="w-64 shrink-0 border-r border-line bg-panel overflow-y-auto">
-        <KitMenu kind="sound" />
         <DesignPanel />
         <SourceList />
+      <KitMenu kind="sound" />
       </aside>
       <div className="relative flex-1 min-w-0 bg-canvas">
         <PlanCanvas bounds={{ x: -2, y: -2, w: project.venue.w + 4, h: project.venue.l + 4 }} grid={{ x: 0, y: 0, w: project.venue.w, h: project.venue.l }} onBackground={() => ui.set({ sel: null })}>
@@ -60,7 +60,7 @@ export function SoundWorkspace() {
           {cov && plan && <CoverageLayer cov={cov} target={targetOf(plan)} />}
           {plan?.sources.map((s) => <SourceNode key={s.id} s={s} selected={s.id === ui.sel} />)}
         </PlanCanvas>
-        <div className="absolute top-3 left-3 glass rounded-xl p-1 flex gap-0.5 text-[11px]" role="group" aria-label="Coverage map">
+        <div className="absolute top-3 right-3 z-20 glass rounded-xl p-1 flex gap-0.5 text-[11px]" role="group" aria-label="Coverage map">
           {(
             [
               ['tops', 'Coverage'],
@@ -74,7 +74,7 @@ export function SoundWorkspace() {
           ))}
         </div>
         {cov && plan && (
-          <div className="absolute left-3 bottom-3 glass rounded-xl px-3 py-2 text-[10px] space-y-0.5">
+          <div className="absolute left-3 bottom-14 glass rounded-xl px-3 py-2 text-[10px] space-y-0.5">
             <div className="font-medium text-[11px] mb-1">
               {ui.map === 'subs' ? 'Bass level' : 'Level'} vs target {targetOf(plan)} dB
             </div>
