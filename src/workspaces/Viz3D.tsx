@@ -4,7 +4,7 @@ import { PartsScene } from './Parts3D'
 import { useContent } from '../lib/useContent'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { hitAt, lightsAt, screensAt } from '../lib/show'
-import { showNow } from '../lib/showPlayer'
+import { pause, play, seek, showNow, usePlayer } from '../lib/showPlayer'
 import { ShowTimeline } from './ShowTimeline'
 import { Edges, Environment, Html, Lightformer, MeshReflectorMaterial, OrbitControls, PerformanceMonitor, Sky, Stars } from '@react-three/drei'
 import { useDevice } from '../lib/device'
@@ -151,7 +151,17 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
       if (e.code === 'Space') {
         if (e.target instanceof HTMLButtonElement) return
         e.preventDefault()
+        // With the show timeline open, Space plays and pauses (like any music or video editor).
+        if (usePlayer.getState().open) {
+          if (!e.repeat) (usePlayer.getState().playing ? pause() : play())
+          return
+        }
         if (!e.repeat) setSpaceGrab(true)
+        return
+      }
+      if (e.key === 'Home' && usePlayer.getState().open) {
+        e.preventDefault()
+        seek(0)
         return
       }
       const m = moves[k]

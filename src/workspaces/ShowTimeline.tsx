@@ -2,7 +2,9 @@
 // Press play and the scene performs the show; drag cues to the beat, scrub anywhere, loop the whole thing.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import { Music, Pause, Play, Plus, Repeat, Sparkles, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Flame, Music, Pause, Play, Plus, Repeat, SkipBack, Sparkles, Trash2, X } from 'lucide-react'
+import { newDecor } from '../lib/decor'
+import { stageBounds } from '../lib/calc'
 import { useStore } from '../store'
 import type { Project, Show, ShowCue } from '../types'
 import { clock, EMPTY_SHOW, FX_NAMES, LANES, newCue, quickShow, snapTime, tapTempo, type FxKind, type Lane } from '../lib/show'
@@ -29,6 +31,21 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
   const playing = usePlayer((s) => s.playing)
   const loop = usePlayer((s) => s.loop)
   const [zoom, setZoom] = useState(18) // pixels per second
+  const [mini, setMini] = useState(() => {
+    try {
+      return localStorage.getItem('unifest:show-mini') === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleMini = () => {
+    setMini(!mini)
+    try {
+      localStorage.setItem('unifest:show-mini', mini ? '0' : '1')
+    } catch {
+      /* private mode */
+    }
+  }
   const [selId, setSelId] = useState<string | null>(null)
   const [snap, setSnap] = useState(true)
   const [peaks, setPeaks] = useState<Float32Array | null>(null)
@@ -121,6 +138,12 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
     raf = requestAnimationFrame(loopFn)
     return () => cancelAnimationFrame(raf)
   }, [zoom])
+
+  // The whole show fits the panel when it opens or the length changes.
+  useEffect(() => {
+    const w = scroller.current?.clientWidth
+    if (w) setZoom(Math.max(6, Math.min(80, (w - LABEL_W - 24) / Math.max(10, show.length))))
+  }, [show.length, mini, show.cues.length > 0])
 
   // Waveform behind the ruler.
   const width = Math.max(200, show.length * zoom)
@@ -221,6 +244,9 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
         <button className="btn h-8 w-10 justify-center btn-on" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : 'Play the show'} onClick={() => (playing ? pause() : play())}>
           {playing ? <Pause size={14} /> : <Play size={14} />}
         </button>
+        <button className="btn h-8 w-8 justify-center" aria-label="Back to the start" title="Back to the start (Home)" onClick={() => seek(0)}>
+          <SkipBack size={13} />
+        </button>
         <span className="tabular-nums w-24">
           <span ref={timeText}>0:00.0</span> / {clock(show.length)}
         </span>
@@ -265,6 +291,8 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
               onClick={() => {
                 if (show.cues.length && !confirm('Replace the current cues with a ready-made show? (Ctrl+Z brings them back)')) return
                 edit((s) => void (s.cues = quickShow(s.length, s.bpm ?? 120)))
+                seek(0)
+                notify('Show ready: press Play (or Space) to watch it')
               }}
             >
               <Sparkles size={13} /> Quick show
@@ -272,17 +300,45 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
           </>
         )}
         <span className="ml-auto flex items-center gap-1">
-          <input type="range" min={6} max={80} value={zoom} onChange={(e) => setZoom(+e.target.value)} aria-label="Timeline zoom" className="w-20" />
+          {!mini && <input type="range" min={6} max={80} value={zoom} onChange={(e) => setZoom(+e.target.value)} aria-label="Timeline zoom" title="Zoom the timeline" className="w-20" />}
+          <button className="btn btn-icon h-8 w-8" aria-label={mini ? 'Show the timeline' : 'Minimise the timeline'} title={mini ? 'Show the lanes' : 'Minimise: keep just the play controls'} onClick={toggleMini}>
+            {mini ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
           <button className="btn btn-icon h-8 w-8" aria-label="Close the show timeline" onClick={onClose}>
             <X size={13} />
           </button>
         </span>
       </div>
 
-      <div ref={scroller} className="relative overflow-x-auto overflow-y-hidden rounded-lg bg-black/30" style={{ maxWidth: '100%' }}>
+      {!mini && !show.cues.length && editable && (
+        <div className="rounded-lg bg-black/30 p-4 mb-1.5 text-center">
+          <div className="text-sm font-medium">Program a show to your music</div>
+          <p className="text-mute mt-1 mb-3">Lights, screens and effects follow a timeline. Start from a ready-made show and adjust it, or add cues yourself.</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button className="btn btn-primary h-9" onClick={() => (edit((s) => void (s.cues = quickShow(s.length, s.bpm ?? 120))), seek(0), notify('Show ready: press Play (or Space) to watch it'))}>
+              <Sparkles size={14} /> Quick show
+            </button>
+            <button className="btn h-9" onClick={() => file.current?.click()}>
+              <Music size={14} /> {show.audio ? 'Change music' : 'Add music first'}
+            </button>
+          </div>
+          <p className="text-[10px] text-mute mt-2">Tip: add music first, so Quick show fits the song length.</p>
+        </div>
+      )}
+      <div ref={scroller} className={`relative overflow-x-auto overflow-y-hidden rounded-lg bg-black/30 ${mini || (!show.cues.length && editable) ? 'hidden' : ''}`} style={{ maxWidth: '100%' }}>
         <div className="relative" style={{ width: width + LABEL_W + 20 }}>
           {/* Ruler + waveform: click to jump */}
-          <div className="relative h-10 cursor-pointer" onPointerDown={(e) => seek(toTime(e.clientX))}>
+          <div
+            className="relative h-10 cursor-ew-resize"
+            title="Click or drag to move through the show"
+            onPointerDown={(e) => {
+              seek(toTime(e.clientX))
+              const mv = (ev: PointerEvent) => seek(toTime(ev.clientX))
+              const up = () => (window.removeEventListener('pointermove', mv), window.removeEventListener('pointerup', up))
+              window.addEventListener('pointermove', mv)
+              window.addEventListener('pointerup', up)
+            }}
+          >
             <canvas ref={wave} className="absolute top-0 h-10 pointer-events-none" style={{ left: LABEL_W, width }} />
             {ticks.map((k, i) => (
               <div key={i} className="absolute top-0 pointer-events-none" style={{ left: LABEL_W + k.x, height: k.bar ? 40 : 8, borderLeft: `1px solid ${k.bar ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)'}` }}>
@@ -326,16 +382,16 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
                 ))}
             </div>
           ))}
-          <div ref={head} className="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none" style={{ left: 0 }} />
+          <div ref={head} className="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none" style={{ left: 0 }}>
+            <div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[5px] border-x-transparent border-t-[7px] border-t-red-500" />
+          </div>
         </div>
       </div>
 
-      {editable && (
+      {editable && !mini && show.cues.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mt-1.5 min-h-8">
           {!sel ? (
-            <span className="text-mute">
-              {show.cues.length ? 'Click a cue to change it. Double-click a lane (or press +) to add one at that time.' : 'Start with Quick show, or double-click a lane to add cues. Add music to line them up with the beat.'}
-            </span>
+            <span className="text-mute">Click a cue to change it. Double-click a lane (or press +) to add one. Space plays and pauses.</span>
           ) : (
             <>
               <b className="mr-1">{LANES.find((l) => l.id === sel.lane)?.name}</b>
@@ -400,7 +456,25 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
       )}
       {!editable && !show.cues.length && <p className="text-mute mt-1">This design has no show programmed yet.</p>}
       {editable && show.cues.some((c) => c.lane === 'fx') && !(project.decor ?? []).some((d) => ['cold-pyro', 'co2-jet', 'flame', 'confetti', 'firework', 'smoke', 'bubble'].includes(d.kind)) && (
-        <p className="text-warn mt-1">Effects cues need effects placed in the design: add cold pyro, CO₂ jets, flames or confetti in Decor &amp; FX.</p>
+        <div className="flex flex-wrap items-center gap-2 mt-1.5 text-warn">
+          The effects cues have nothing to fire: this design has no pyro, CO₂ or confetti yet.
+          <button
+            className="btn h-7 text-[11px]"
+            title="Place 2 cold pyro and 2 CO₂ jets along the stage front and a confetti cannon in the middle (move them later in Decor & FX)"
+            onClick={() =>
+              mutate((p) => {
+                const sb = stageBounds(p)
+                const cx = sb ? sb.x + sb.w / 2 : p.venue.w / 2
+                const front = sb ? sb.y + sb.l + 0.6 : p.venue.l / 3
+                const half = sb ? sb.w / 2 : 6
+                p.decor ??= []
+                for (const [k, dx] of [['cold-pyro', -half * 0.6], ['cold-pyro', half * 0.6], ['co2-jet', -half * 0.9], ['co2-jet', half * 0.9], ['confetti', 0]] as const) p.decor.push(newDecor(k, +(cx + dx).toFixed(2), +front.toFixed(2)))
+              })
+            }
+          >
+            <Flame size={12} /> Add them for me
+          </button>
+        </div>
       )}
     </div>
   )
