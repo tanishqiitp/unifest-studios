@@ -2,12 +2,12 @@
 // Press play and the scene performs the show; drag cues to the beat, scrub anywhere, loop the whole thing.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import { ChevronDown, ChevronUp, Flame, Music, Pause, Play, Plus, Repeat, SkipBack, Sparkles, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Copy, Flag, Flame, Maximize2, Music, Pause, Play, Plus, Repeat, SkipBack, Sparkles, Trash2, X } from 'lucide-react'
 import { newDecor } from '../lib/decor'
 import { stageBounds } from '../lib/calc'
 import { useStore } from '../store'
 import type { Project, Show, ShowCue } from '../types'
-import { clock, EMPTY_SHOW, FX_NAMES, LANES, newCue, quickShow, snapTime, tapTempo, type FxKind, type Lane } from '../lib/show'
+import { clock, EMPTY_SHOW, FX_NAMES, LANES, lightsAt, newCue, quickShow, screensAt, snapTime, tapTempo, type FxKind, type Lane } from '../lib/show'
 import { getAudio, loadMusic, pause, play, saveMusic, seek, setMusic, showTime, tick, usePlayer, waveform } from '../lib/showPlayer'
 
 const SWATCH: Record<string, string> = { white: '#ffffff', warm: '#ffb36b', ice: '#8fd3ff', duo: 'linear-gradient(90deg,#ff2bd6,#4b5bff)', rainbow: 'linear-gradient(90deg,#f33,#fd3,#3f6,#3cf,#a3f)', red: '#ff3344', green: '#33ff88' }
@@ -46,7 +46,13 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
       /* private mode */
     }
   }
-  const [selId, setSelId] = useState<string | null>(null)
+  const [selIds, setSelIds] = useState<string[]>([])
+  const selId = selIds.at(-1) ?? null
+  const setSelId = (id: string | null) => setSelIds(id ? [id] : [])
+  const [box, setBox] = useState<{ x0: number; x1: number; y0: number; y1: number } | null>(null)
+  const hoverLane = useRef<Lane | null>(null)
+  const nowText = useRef<HTMLSpanElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
   const [snap, setSnap] = useState(true)
   const [peaks, setPeaks] = useState<Float32Array | null>(null)
   const [musicNote, setMusicNote] = useState<string | null>(null)
@@ -127,6 +133,21 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
       const t = showTime()
       if (head.current) head.current.style.transform = `translateX(${LABEL_W + t * zoom}px)`
       if (timeText.current) timeText.current.textContent = clock(t)
+      if (nowText.current) {
+        const sh = usePlayer.getState().show
+        const l = lightsAt(sh, t)
+        const sc = screensAt(sh, t)
+        const fx = (sh?.cues ?? []).filter((c) => c.lane === 'fx' && t >= c.t && t < c.t + c.dur).map((c) => FX_NAMES[(c.fx as FxKind) ?? 'cold-pyro'])
+        const mk = [...(sh?.markers ?? [])].reverse().find((m) => m.t <= t)
+        nowText.current.textContent = [
+          mk ? `▸ ${mk.name}` : '',
+          l ? `Lights: ${l.color ? 'one colour' : l.palette}${l.speed === 0 ? ' still' : l.speed > 1 ? ' fast' : ''}${l.strobe ? ' strobe' : ''}` : 'Lights: as set',
+          `Screens: ${sc ? sc.mode : 'content'}`,
+          fx.length ? `FX: ${[...new Set(fx)].join(', ')}` : '',
+        ]
+          .filter(Boolean)
+          .join('  ·  ')
+      }
       // Keep the playhead in view while playing.
       const sc = scroller.current
       if (sc && usePlayer.getState().playing) {
@@ -178,23 +199,46 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
     const r = sc.getBoundingClientRect()
     return (clientX - r.left + sc.scrollLeft - LABEL_W) / zoom
   }
-  const snapT = (t: number) => (snap ? snapTime(t, bpm, 2) : Math.round(t * 20) / 20)
+  // Snap like Blender: to markers and other cues' edges when close, otherwise to half beats.
+  const snapT = (t: number, skip: string[] = []) => {
+    if (!snap) return Math.max(0, Math.round(t * 20) / 20)
+    const reach = 8 / zoom
+    let best = Infinity
+    let at = t
+    const near = (v: number) => {
+      const d = Math.abs(v - t)
+      if (d < reach && d < best) (best = d), (at = v)
+    }
+    for (const m of show.markers ?? []) near(m.t)
+    for (const c of show.cues) if (!skip.includes(c.id)) (near(c.t), near(c.t + c.dur))
+    return best < Infinity ? at : snapTime(t, bpm, 2)
+  }
 
   // Drag a cue (move) or its right edge (length). The whole drag is one undo step.
   const drag = (c: ShowCue, mode: 'move' | 'len') => (e: React.PointerEvent) => {
-    if (!editable) return
+    if (!editable || e.button !== 0) return
     e.stopPropagation()
-    setSelId(c.id)
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      setSelIds((s) => (s.includes(c.id) ? s.filter((x) => x !== c.id) : [...s, c.id]))
+      return
+    }
+    const group = mode === 'move' && selIds.includes(c.id) ? selIds : [c.id]
+    if (!selIds.includes(c.id)) setSelId(c.id)
+    const starts = new Map(show.cues.filter((x) => group.includes(x.id)).map((x) => [x.id, x.t]))
     const x0 = e.clientX
     const t0 = c.t
     const d0 = c.dur
     const move = (ev: PointerEvent) => {
       const dt = (ev.clientX - x0) / zoom
+      if (Math.abs(ev.clientX - x0) < 3) return
       edit((s) => {
-        const k = s.cues.find((x) => x.id === c.id)
-        if (!k) return
-        if (mode === 'move') k.t = Math.max(0, Math.min(s.length, snapT(t0 + dt)))
-        else k.dur = Math.max(0.1, snapT(t0 + d0 + dt) - t0)
+        if (mode === 'move') {
+          const delta = Math.max(-Math.min(...starts.values()), snapT(t0 + dt, group) - t0)
+          for (const k of s.cues) if (starts.has(k.id)) k.t = Math.min(s.length, +(starts.get(k.id)! + delta).toFixed(3))
+        } else {
+          const k = s.cues.find((x) => x.id === c.id)
+          if (k) k.dur = Math.max(0.1, +(snapT(t0 + d0 + dt, [c.id]) - t0).toFixed(3))
+        }
       })
     }
     const up = () => {
@@ -218,19 +262,85 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
     edit((s) => void (s.cues = s.cues.filter((x) => x.id !== sel.id)))
     setSelId(null)
   }
+  const duplicate = () => {
+    const picked = show.cues.filter((c) => selIds.includes(c.id))
+    if (!picked.length) return
+    const start = Math.min(...picked.map((c) => c.t))
+    const span = Math.max(...picked.map((c) => c.t + c.dur)) - start
+    const copies = picked.map((c) => ({ ...c, id: nanoid(6), t: +(c.t + span).toFixed(3) })).filter((c) => c.t < show.length)
+    edit((s) => void s.cues.push(...copies))
+    setSelIds(copies.map((c) => c.id))
+  }
+  const addMarker = () => {
+    const t = +showTime().toFixed(3)
+    const n = (show.markers?.length ?? 0) + 1
+    edit((s) => void (s.markers = [...(s.markers ?? []), { id: nanoid(6), t, name: `Marker ${n}` }].sort((a, b) => a.t - b.t)))
+  }
+  // Keys, as in Blender's timeline: ← → one beat, Shift+← → start/end, ↑ ↓ previous/next cue or marker,
+  // M marker, I insert a cue on the lane under the mouse, Ctrl+D duplicate, Delete, Esc deselect.
   useEffect(() => {
+    usePlayer.getState().set({ keys: !mini })
+    return () => usePlayer.getState().set({ keys: false })
+  }, [mini])
+  useEffect(() => {
+    if (mini) return
     const k = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selId && editable) {
-        e.preventDefault()
-        edit((s) => void (s.cues = s.cues.filter((x) => x.id !== selId)))
-        setSelId(null)
+      if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return
+      const now = showTime()
+      const take = () => (e.preventDefault(), e.stopImmediatePropagation())
+      const key = e.key.toLowerCase()
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        take()
+        const dir = e.key === 'ArrowRight' ? 1 : -1
+        if (e.shiftKey) return seek(dir > 0 ? show.length : 0)
+        return seek(snapTime(now, bpm) + dir * beat)
       }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        take()
+        const stops = [...show.cues.map((c) => c.t), ...(show.markers ?? []).map((m) => m.t)].sort((a, b) => a - b)
+        const next = e.key === 'ArrowUp' ? stops.find((v) => v > now + 0.01) : [...stops].reverse().find((v) => v < now - 0.01)
+        if (next !== undefined) seek(next)
+        return
+      }
+      if (!editable) return
+      if ((e.ctrlKey || e.metaKey) && key === 'd') return (take(), duplicate())
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (key === 'm') return (take(), addMarker())
+      if (key === 'i' && hoverLane.current) return (take(), add(hoverLane.current, now))
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selIds.length) {
+        take()
+        edit((s) => void (s.cues = s.cues.filter((x) => !selIds.includes(x.id))))
+        setSelIds([])
+      }
+      if (e.key === 'Escape' && selIds.length) (take(), setSelIds([]))
     }
-    window.addEventListener('keydown', k)
-    return () => window.removeEventListener('keydown', k)
+    window.addEventListener('keydown', k, true)
+    return () => window.removeEventListener('keydown', k, true)
   })
+
+  // Wheel zooms around the pointer (Blender); Shift+wheel scrolls along.
+  useEffect(() => {
+    const sc = scroller.current
+    if (!sc) return
+    const wheel = (e: WheelEvent) => {
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      e.preventDefault()
+      const r = sc.getBoundingClientRect()
+      const px = e.clientX - r.left
+      const t = (px + sc.scrollLeft - LABEL_W) / zoom
+      const z = Math.max(4, Math.min(160, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+      setZoom(z)
+      requestAnimationFrame(() => (sc.scrollLeft = Math.max(0, LABEL_W + t * z - px)))
+    }
+    sc.addEventListener('wheel', wheel, { passive: false })
+    return () => sc.removeEventListener('wheel', wheel)
+  }, [zoom])
+  const fit = () => {
+    const w = scroller.current?.clientWidth
+    if (w) setZoom(Math.max(4, Math.min(160, (w - LABEL_W - 24) / Math.max(10, show.length))))
+    if (scroller.current) scroller.current.scrollLeft = 0
+  }
 
   const tap = () => {
     taps.current = [...taps.current.filter((x) => performance.now() / 1000 - x < 4), performance.now() / 1000]
@@ -250,6 +360,11 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
         <span className="tabular-nums w-24">
           <span ref={timeText}>0:00.0</span> / {clock(show.length)}
         </span>
+        {editable && (
+          <button className="btn h-8 w-8 justify-center" title="Add a marker at the playhead (M): name moments like Drop or Chorus" aria-label="Add marker" onClick={addMarker}>
+            <Flag size={13} />
+          </button>
+        )}
         <button className={`btn h-8 w-8 justify-center ${loop ? 'btn-on' : ''}`} title="Loop the show" aria-pressed={loop} onClick={() => usePlayer.getState().set({ loop: !loop })}>
           <Repeat size={13} />
         </button>
@@ -300,7 +415,12 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
           </>
         )}
         <span className="ml-auto flex items-center gap-1">
-          {!mini && <input type="range" min={6} max={80} value={zoom} onChange={(e) => setZoom(+e.target.value)} aria-label="Timeline zoom" title="Zoom the timeline" className="w-20" />}
+          {!mini && (
+            <button className="btn btn-icon h-8 w-8" title="Fit the whole show in view" aria-label="Fit the whole show" onClick={fit}>
+              <Maximize2 size={13} />
+            </button>
+          )}
+          {!mini && <input type="range" min={4} max={160} value={zoom} onChange={(e) => setZoom(+e.target.value)} aria-label="Timeline zoom" title="Zoom the timeline" className="w-20" />}
           <button className="btn btn-icon h-8 w-8" aria-label={mini ? 'Show the timeline' : 'Minimise the timeline'} title={mini ? 'Show the lanes' : 'Minimise: keep just the play controls'} onClick={toggleMini}>
             {mini ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
@@ -326,7 +446,8 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
         </div>
       )}
       <div ref={scroller} className={`relative overflow-x-auto overflow-y-hidden rounded-lg bg-black/30 ${mini || (!show.cues.length && editable) ? 'hidden' : ''}`} style={{ maxWidth: '100%' }}>
-        <div className="relative" style={{ width: width + LABEL_W + 20 }}>
+        <div ref={inner} className="relative" style={{ width: width + LABEL_W + 20 }}>
+          {box && <div className="absolute z-20 border border-white/70 bg-white/10 pointer-events-none" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
           {/* Ruler + waveform: click to jump */}
           <div
             className="relative h-10 cursor-ew-resize"
@@ -340,6 +461,26 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
             }}
           >
             <canvas ref={wave} className="absolute top-0 h-10 pointer-events-none" style={{ left: LABEL_W, width }} />
+            {(show.markers ?? []).map((m) => (
+              <button
+                key={m.id}
+                className="absolute top-0 z-10 h-4 px-1 rounded-sm bg-amber-400 text-black text-[9px] font-semibold leading-4 whitespace-nowrap -translate-x-0.5"
+                style={{ left: LABEL_W + m.t * zoom }}
+                title={`${m.name} at ${clock(m.t)}: click to jump, double-click to rename, right-click to remove`}
+                onPointerDown={(e) => (e.stopPropagation(), seek(m.t))}
+                onDoubleClick={() => {
+                  if (!editable) return
+                  const name = prompt('Marker name', m.name)?.trim()
+                  if (name) edit((s) => void Object.assign(s.markers?.find((x) => x.id === m.id) ?? {}, { name: name.slice(0, 30) }))
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  if (editable) edit((s) => void (s.markers = (s.markers ?? []).filter((x) => x.id !== m.id)))
+                }}
+              >
+                {m.name}
+              </button>
+            ))}
             {ticks.map((k, i) => (
               <div key={i} className="absolute top-0 pointer-events-none" style={{ left: LABEL_W + k.x, height: k.bar ? 40 : 8, borderLeft: `1px solid ${k.bar ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)'}` }}>
                 {k.bar && (k.bar - 1) % (zoom * beat * 4 < 40 ? 4 : 1) === 0 && <span className="absolute left-1 top-0 text-[9px] text-mute">{k.bar}</span>}
@@ -350,9 +491,33 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
             <div
               key={l.id}
               className="relative h-8 border-t border-line/50"
-              onDoubleClick={(e) => editable && add(l.id, toTime(e.clientX))}
+              onPointerEnter={() => (hoverLane.current = l.id)}
+              onPointerLeave={() => (hoverLane.current = null)}
+              onDoubleClick={(e) => editable && e.target === e.currentTarget && add(l.id, toTime(e.clientX))}
               onPointerDown={(e) => {
-                if (e.target === e.currentTarget) setSelId(null)
+                if (e.target !== e.currentTarget || e.button !== 0) return
+                // Drag on empty lane space to box-select cues (Shift adds to the selection).
+                const r = inner.current!.getBoundingClientRect()
+                const x0 = e.clientX - r.left
+                const y0 = e.clientY - r.top
+                const keep = e.shiftKey ? selIds : []
+                if (!e.shiftKey) setSelIds([])
+                const mv = (ev: PointerEvent) => setBox({ x0, y0, x1: ev.clientX - r.left, y1: ev.clientY - r.top })
+                const up = (ev: PointerEvent) => {
+                  window.removeEventListener('pointermove', mv)
+                  window.removeEventListener('pointerup', up)
+                  setBox(null)
+                  const x1 = ev.clientX - r.left
+                  const y1 = ev.clientY - r.top
+                  if (Math.abs(x1 - x0) < 4) return
+                  const [ta, tb] = [Math.min(x0, x1), Math.max(x0, x1)].map((x) => (x - LABEL_W) / zoom)
+                  const [la, lb] = [Math.min(y0, y1), Math.max(y0, y1)].map((y) => Math.floor((y - 40) / 32))
+                  const lanes = LANES.filter((_, i) => i >= la && i <= lb).map((x) => x.id as string)
+                  const hit = show.cues.filter((c) => lanes.includes(c.lane) && c.t < tb && c.t + c.dur > ta).map((c) => c.id)
+                  setSelIds([...new Set([...keep, ...hit])])
+                }
+                window.addEventListener('pointermove', mv)
+                window.addEventListener('pointerup', up)
               }}
             >
               <div className="sticky left-0 z-10 h-full flex items-center px-2 text-mute bg-panel/80" style={{ width: LABEL_W }}>
@@ -368,11 +533,11 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
                 .map((c) => (
                   <div
                     key={c.id}
-                    className={`absolute top-1 h-6 rounded-md overflow-hidden flex items-center text-[10px] font-medium ${selId === c.id ? 'ring-2 ring-white' : 'ring-1 ring-black/40'} ${editable ? 'cursor-grab' : ''}`}
+                    className={`absolute top-1 h-6 rounded-md overflow-hidden flex items-center text-[10px] font-medium ${selIds.includes(c.id) ? 'ring-2 ring-white z-[1]' : 'ring-1 ring-black/40'} ${editable ? 'cursor-grab' : ''}`}
                     style={{ left: LABEL_W + c.t * zoom, width: Math.max(10, c.dur * zoom), background: cueBg(c) }}
                     title={`${cueText(c)} at ${clock(c.t)} for ${c.dur.toFixed(1)} s${editable ? ' (drag to move, drag the right edge to lengthen, Delete removes)' : ''}`}
                     onPointerDown={drag(c, 'move')}
-                    onClick={(e) => (e.stopPropagation(), setSelId(c.id))}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <span className="px-1.5 truncate text-black mix-blend-luminosity" style={{ color: '#000', textShadow: '0 0 2px rgba(255,255,255,0.8)' }}>
                       {cueText(c)}
@@ -388,10 +553,25 @@ export function ShowTimeline({ project, editable, onClose }: { project: Project;
         </div>
       </div>
 
+      {!mini && show.cues.length > 0 && <span ref={nowText} className="block mt-1 text-[10px] text-dim truncate" aria-live="off" />}
       {editable && !mini && show.cues.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mt-1.5 min-h-8">
-          {!sel ? (
-            <span className="text-mute">Click a cue to change it. Double-click a lane (or press +) to add one. Space plays and pauses.</span>
+          {selIds.length > 1 ? (
+            <>
+              <b>{selIds.length} cues selected</b>
+              <span className="text-mute">Drag any of them to move all together.</span>
+              <button className="btn h-8" onClick={duplicate} title="Copy them right after the selection (Ctrl+D)">
+                <Copy size={13} /> Duplicate
+              </button>
+              <button
+                className="btn h-8 hover:text-err"
+                onClick={() => (edit((s) => void (s.cues = s.cues.filter((x) => !selIds.includes(x.id)))), setSelIds([]))}
+              >
+                <Trash2 size={13} /> Delete
+              </button>
+            </>
+          ) : !sel ? (
+            <span className="text-mute">Click a cue to edit · Shift-click or drag a box for several · double-click a lane or press I to add · M marker · ← → beats · ↑ ↓ cues · Space plays</span>
           ) : (
             <>
               <b className="mr-1">{LANES.find((l) => l.id === sel.lane)?.name}</b>

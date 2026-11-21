@@ -251,6 +251,7 @@ export interface Show {
   length: number // seconds
   bpm?: number
   audio?: { id: string; name: string } // music file kept in this browser
+  markers?: { id: string; t: number; name: string }[] // named moments: Drop, Chorus, Finale
 }
 
 export interface Cue {

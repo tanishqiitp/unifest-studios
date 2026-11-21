@@ -14,7 +14,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import type { OrbitControls as OrbitImpl } from 'three-stdlib'
-import { Zap, Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, Hand, ListMusic, Maximize, Orbit, Rotate3d, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { Zap, Camera, ChevronDown, ChevronUp, Clapperboard, Compass, Crosshair, Eye, Film, ListMusic, Maximize, Orbit, RotateCcw, RotateCw, Tag, Users, Waves, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useStore } from '../store'
 import type { Fixture, GroundItem, Project, Screen, Table, Truss } from '../types'
 import { fmt, screenColumns, screenStats, stageBounds, TRUSS_INFO, trussLength } from '../lib/calc'
@@ -105,9 +105,37 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const hasShow = !!project.show?.cues.length
   const [viewCmd, setViewCmd] = useState<ViewCmd | null>(null)
   const [angles, setAngles] = useState<Angles>({ az: 0, el: 20 })
-  const [navPref, setNavPref] = useState<Nav>('orbit')
+  // No mode switch: drag turns the view; right-drag, Shift-drag or Space-drag moves across the ground.
+  // On touch screens two fingers move, or double-tap and drag with one finger.
   const [spaceGrab, setSpaceGrab] = useState(false)
-  const nav: Nav = spaceGrab ? 'grab' : navPref
+  const [shiftGrab, setShiftGrab] = useState(false)
+  const [tapGrab, setTapGrab] = useState(false)
+  const nav: Nav = spaceGrab || shiftGrab || tapGrab ? 'grab' : 'orbit'
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    let last = { t: 0, x: 0, y: 0 }
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !e.isPrimary) return
+      const now = performance.now()
+      if (now - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40) {
+        // Second tap: this drag moves across the ground. Set it before the controls see the touch.
+        if (orbitHandle.c) orbitHandle.c.touches.ONE = THREE.TOUCH.PAN
+        setTapGrab(true)
+        last = { t: 0, x: 0, y: 0 }
+      } else last = { t: now, x: e.clientX, y: e.clientY }
+    }
+    const up = (e: PointerEvent) => e.pointerType === 'touch' && setTapGrab(false)
+    el.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      el.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [])
   const view = (kind: ViewCmd['kind'], value: ViewCmd['value'] = 0) => {
     setShowcase(false)
     setViewCmd({ kind, value, n: Date.now() + Math.random() })
@@ -117,6 +145,8 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || e.ctrlKey || e.metaKey) return
+      // While the show timeline is open, the arrow keys move its playhead instead.
+      if (usePlayer.getState().keys && e.key.startsWith('Arrow')) return
       const step = e.shiftKey ? 45 : 15
       const map: Record<string, [ViewCmd['kind'], number]> = {
         ArrowLeft: ['rotate', -THREE.MathUtils.degToRad(step)],
@@ -173,16 +203,19 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
         setViewCmd({ kind: 'pan', value: [m[0] * big, m[1] * big], n: Date.now() + Math.random() })
         return
       }
-      if (k === 'h') setNavPref('grab')
-      if (k === 'v') setNavPref('orbit')
       if (k === 'f') {
         e.stopImmediatePropagation()
         setShowcase(false)
         setViewCmd({ kind: 'fit', value: 0, n: Date.now() + Math.random() })
       }
     }
-    const up = (e: KeyboardEvent) => e.code === 'Space' && setSpaceGrab(false)
-    const blur = () => setSpaceGrab(false)
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setSpaceGrab(false)
+      if (e.key === 'Shift') setShiftGrab(false)
+    }
+    const shift = (e: KeyboardEvent) => e.key === 'Shift' && !typing(e) && setShiftGrab(true)
+    window.addEventListener('keydown', shift)
+    const blur = () => (setSpaceGrab(false), setShiftGrab(false))
     window.addEventListener('keydown', down, true)
     window.addEventListener('keyup', up, true)
     window.addEventListener('blur', blur)
@@ -190,6 +223,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
       window.removeEventListener('keydown', down, true)
       window.removeEventListener('keyup', up, true)
       window.removeEventListener('blur', blur)
+      window.removeEventListener('keydown', shift)
     }
   }, [compact])
   const fileRef = useRef<HTMLInputElement>(null)
@@ -213,7 +247,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
   const bg = look === 'tech' ? '#ededed' : look === 'day' ? '#b9c6d3' : '#000'
 
   return (
-    <div className={`relative h-full w-full overflow-hidden ${nav === 'grab' ? 'cursor-grab active:cursor-grabbing' : ''}`} style={{ background: bg }}>
+    <div ref={rootRef} className={`relative h-full w-full overflow-hidden ${nav === 'grab' ? 'cursor-grab active:cursor-grabbing' : ''}`} style={{ background: bg }}>
       <Canvas
         onCreated={glCreated}
         shadows={quality === 'best' || (quality === 'show' && !lowPower)}
@@ -402,7 +436,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
         )}
       </div>
 
-      <ViewPad angles={angles} view={view} compact={!!compact} nav={nav} setNav={setNavPref} />
+      <ViewPad angles={angles} view={view} compact={!!compact} />
 
       {info && (
         <div className="absolute right-[176px] top-20 z-10 glass rounded-xl p-4 w-64 fade-in">
@@ -425,7 +459,7 @@ export function Viewer({ project, compact }: { project: Project; compact?: boole
       {!compact && !rec && (
         <div className={`absolute left-4 bottom-4 text-[11px] hidden xl:flex items-center gap-1.5 ${look === 'show' ? 'text-mute' : 'text-black/50'}`}>
           <Eye size={12} />
-          {nav === 'grab' ? 'Drag to grab and move · right-drag to orbit' : 'Drag to orbit · right-drag to grab'} · scroll zooms to the pointer · double-click to fly there · W A S D move · F whole ground
+          Drag to turn · right-drag or Shift-drag to move · scroll zooms to the pointer · double-click to fly there · W A S D move · F whole ground
         </div>
       )}
 
@@ -455,20 +489,28 @@ const VIEWS = [
   ['back', 'Back'],
 ] as const
 
-function NavToggle({ nav, setNav }: { nav: Nav; setNav: (n: Nav) => void }) {
+// Live handle to the 3D view's camera controls, so a touch gesture can switch to moving before they see it.
+const orbitHandle: { c?: { touches: { ONE?: number; TWO?: number } } } = {}
+
+// How to move the view, shown once in the View panel instead of a mode switch.
+function NavHelp() {
+  const touch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
   return (
-    <div className="grid grid-cols-2 gap-1" role="group" aria-label="Mouse mode">
-      <button className={`btn h-7 px-0 justify-center text-[10px] ${nav === 'orbit' ? 'btn-on' : ''}`} title="Orbit (V): drag to turn the view" onClick={() => setNav('orbit')}>
-        <Rotate3d size={12} /> Orbit
-      </button>
-      <button className={`btn h-7 px-0 justify-center text-[10px] ${nav === 'grab' ? 'btn-on' : ''}`} title="Grab (H, or hold Space): drag to move across the ground" onClick={() => setNav('grab')}>
-        <Hand size={12} /> Grab
-      </button>
+    <div className="text-[10px] text-mute leading-snug px-1" aria-label="How to move the view">
+      {touch ? (
+        <>
+          <b className="text-dim">One finger</b> turns · <b className="text-dim">two fingers</b> move and zoom · <b className="text-dim">double-tap and drag</b> moves
+        </>
+      ) : (
+        <>
+          <b className="text-dim">Drag</b> turns · <b className="text-dim">right-drag</b> or <b className="text-dim">Shift-drag</b> moves · scroll zooms
+        </>
+      )}
     </div>
   )
 }
 
-function ViewPad({ angles, view, compact, nav, setNav }: { angles: Angles; view: (k: ViewCmd['kind'], v?: ViewCmd['value']) => void; compact: boolean; nav: Nav; setNav: (n: Nav) => void }) {
+function ViewPad({ angles, view, compact }: { angles: Angles; view: (k: ViewCmd['kind'], v?: ViewCmd['value']) => void; compact: boolean }) {
   const [open, setOpen] = useState(!compact && useDevice.getState().kind !== 'phone')
   const deg = THREE.MathUtils.degToRad
   const btn = 'btn btn-icon h-8 w-8'
@@ -478,9 +520,6 @@ function ViewPad({ angles, view, compact, nav, setNav }: { angles: Angles; view:
       <div className={`absolute right-4 ${pos} z-10 flex flex-col gap-1.5 items-end`}>
         <button className="glass rounded-xl btn h-9" onClick={() => setOpen(true)} title="Turn and tilt the view">
           <Compass size={14} /> View
-        </button>
-        <button className={`glass rounded-xl btn btn-icon h-9 w-9 ${nav === 'grab' ? 'btn-on' : ''}`} onClick={() => setNav(nav === 'grab' ? 'orbit' : 'grab')} title={nav === 'grab' ? 'Grab is on: one finger or drag moves across the ground' : 'Grab: drag to move across the ground'} aria-pressed={nav === 'grab'}>
-          <Hand size={14} />
         </button>
         <button className="glass rounded-xl btn btn-icon h-9 w-9" onClick={() => view('fit')} title="Show the whole ground">
           <Maximize size={14} />
@@ -495,7 +534,7 @@ function ViewPad({ angles, view, compact, nav, setNav }: { angles: Angles; view:
           <X size={12} />
         </button>
       </div>
-      <NavToggle nav={nav} setNav={setNav} />
+      <NavHelp />
       <button className="btn h-7 w-full justify-center text-[10px] mt-1 mb-2" onClick={() => view('fit')} title="Frame the whole ground (F)">
         <Maximize size={12} /> Whole ground
       </button>
@@ -608,6 +647,8 @@ function focusOf(project: Project) {
 function Scene(props: SceneProps) {
   const { project, preset, camReq, look, palette, motion, crowd, labels, showcase, video, shotReq, rec, compact, onInfo, dropAt, quality } = props
   const controls = useRef<OrbitImpl>(null)
+  // Shared with the Viewer, so a double-tap can switch this touch to moving before the controls read it.
+  useEffect(() => void (orbitHandle.c = (controls.current as unknown as typeof orbitHandle.c) ?? undefined))
   const { camera, gl, scene, size, setSize, setDpr, viewport } = useThree()
   const f = useMemo(() => focusOf(project), [project])
   const { W, L, sb } = f
