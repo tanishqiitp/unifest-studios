@@ -5,7 +5,7 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 export type SculptBase = 'sphere' | 'panel' | 'block'
 export type SculptRes = 'low' | 'medium' | 'high'
-export type Brush = 'draw' | 'inflate' | 'smooth' | 'grab' | 'flatten' | 'pinch'
+export type Brush = 'draw' | 'inflate' | 'smooth' | 'grab' | 'flatten' | 'pinch' | 'crease' | 'twist' | 'scale' | 'snake' | 'mask' | 'paint'
 
 // Points per sculpt object. High stays under ~45k points so a brush stroke stays smooth on laptops.
 const SPHERE_DETAIL: Record<SculptRes, number> = { low: 24, medium: 40, high: 64 }
@@ -113,11 +113,16 @@ export function neighbours(index: THREE.BufferAttribute, count: number) {
 // ---------------------------------------------------------------- brushes
 
 export interface Dab {
-  brush: Exclude<Brush, 'grab'>
+  brush: Exclude<Brush, 'grab' | 'snake'>
   centre: [number, number, number] // local coordinates
   radius: number // local units
   strength: number // 0..1
   invert: boolean
+  /** 0..1 per point: masked points (1) are protected from every brush except the mask brush itself. */
+  mask?: Float32Array | null
+  /** Paint: per-point RGB (0..1) to blend towards `color`. */
+  colors?: Float32Array | null
+  color?: [number, number, number]
 }
 
 const smoothstep = (t: number) => t * t * (3 - 2 * t)
@@ -137,7 +142,9 @@ export function applyDab(pos: Float32Array, nrm: Float32Array, adj: { start: Uin
     const dz = pos[i * 3 + 2] - cz
     const q = dx * dx + dy * dy + dz * dz
     if (q > r2) continue
-    const f = smoothstep(1 - Math.sqrt(q) / d.radius)
+    let f = smoothstep(1 - Math.sqrt(q) / d.radius)
+    if (d.mask && d.brush !== 'mask') f *= 1 - d.mask[i]
+    if (f <= 0) continue
     hits.push(i)
     w.push(f)
     ax += nrm[i * 3] * f
@@ -151,6 +158,23 @@ export function applyDab(pos: Float32Array, nrm: Float32Array, adj: { start: Uin
   az /= al
   const sign = d.invert ? -1 : 1
   const step = d.radius * 0.12 * d.strength
+  // Mask and paint change what the points carry, not where they are.
+  if (d.brush === 'mask' && d.mask) {
+    hits.forEach((i, k) => (d.mask![i] = Math.min(1, Math.max(0, d.mask![i] + w[k] * d.strength * 0.6 * sign))))
+    return hits
+  }
+  if (d.brush === 'paint') {
+    if (!d.colors || !d.color) return []
+    const [r, g, b] = d.color
+    hits.forEach((i, k) => {
+      const t = Math.min(1, w[k] * d.strength * 0.6)
+      const o = i * 3
+      d.colors![o] += (r - d.colors![o]) * t
+      d.colors![o + 1] += (g - d.colors![o + 1]) * t
+      d.colors![o + 2] += (b - d.colors![o + 2]) * t
+    })
+    return hits
+  }
   if (d.brush === 'smooth' && adj) {
     const next = new Float32Array(hits.length * 3)
     hits.forEach((i, k) => {
@@ -191,6 +215,33 @@ export function applyDab(pos: Float32Array, nrm: Float32Array, adj: { start: Uin
       pos[o] -= ax * dist * t
       pos[o + 1] -= ay * dist * t
       pos[o + 2] -= az * dist * t
+    } else if (d.brush === 'crease') {
+      // After SculptGL's Crease (MIT, Stéphane Ginier): pinch towards the centre while cutting in along the
+      // surface, so strokes leave a sharp groove (Ctrl: a sharp ridge).
+      const t = Math.min(1, f * d.strength * 0.12)
+      const cut = step * Math.pow(f, 5) * -sign * 1.5
+      pos[o] += (cx - pos[o]) * t + ax * cut
+      pos[o + 1] += (cy - pos[o + 1]) * t + ay * cut
+      pos[o + 2] += (cz - pos[o + 2]) * t + az * cut
+    } else if (d.brush === 'twist') {
+      // Turn the area about the surface direction through the brush centre (Ctrl: the other way).
+      const ang = f * d.strength * 0.12 * sign
+      const px = pos[o] - cx
+      const py = pos[o + 1] - cy
+      const pz = pos[o + 2] - cz
+      const c = Math.cos(ang)
+      const s = Math.sin(ang)
+      const dot = ax * px + ay * py + az * pz
+      // Rodrigues' rotation about the unit axis (ax, ay, az).
+      pos[o] = cx + px * c + (ay * pz - az * py) * s + ax * dot * (1 - c)
+      pos[o + 1] = cy + py * c + (az * px - ax * pz) * s + ay * dot * (1 - c)
+      pos[o + 2] = cz + pz * c + (ax * py - ay * px) * s + az * dot * (1 - c)
+    } else if (d.brush === 'scale') {
+      // After SculptGL's Local scale: grow the area around the brush (Ctrl: shrink it).
+      const t = f * d.strength * 0.04 * sign
+      pos[o] += (pos[o] - cx) * t
+      pos[o + 1] += (pos[o + 1] - cy) * t
+      pos[o + 2] += (pos[o + 2] - cz) * t
     } else if (d.brush === 'pinch') {
       const t = Math.min(1, f * d.strength * 0.15) * sign
       pos[o] += (cx - pos[o]) * t
@@ -265,7 +316,7 @@ export function updateNormals(pos: Float32Array, nrm: Float32Array, index: THREE
 }
 
 /** Points and weights a grab stroke will move, taken once at the start of the stroke. */
-export function grabSet(pos: Float32Array, centre: [number, number, number], radius: number) {
+export function grabSet(pos: Float32Array, centre: [number, number, number], radius: number, mask?: Float32Array | null) {
   const idx: number[] = []
   const w: number[] = []
   const start: number[] = []
@@ -273,7 +324,7 @@ export function grabSet(pos: Float32Array, centre: [number, number, number], rad
     const q = Math.hypot(pos[i * 3] - centre[0], pos[i * 3 + 1] - centre[1], pos[i * 3 + 2] - centre[2])
     if (q > radius) continue
     idx.push(i)
-    w.push(smoothstep(1 - q / radius))
+    w.push(smoothstep(1 - q / radius) * (mask ? 1 - mask[i] : 1))
     start.push(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2])
   }
   return { idx, w, start }
@@ -285,4 +336,69 @@ export function applyGrab(pos: Float32Array, set: ReturnType<typeof grabSet>, de
     pos[i * 3 + 1] = set.start[k * 3 + 1] + delta[1] * set.w[k]
     pos[i * 3 + 2] = set.start[k * 3 + 2] + delta[2] * set.w[k]
   })
+}
+
+/**
+ * Snake hook (SculptGL's Drag): pull the points under the brush along with the mouse, picking up new points
+ * at every step, so you can draw out horns, tentacles and drips.
+ */
+export function applySnake(pos: Float32Array, centre: [number, number, number], radius: number, delta: [number, number, number], mask?: Float32Array | null): number[] {
+  const hits: number[] = []
+  for (let i = 0, n = pos.length / 3; i < n; i++) {
+    const q = Math.hypot(pos[i * 3] - centre[0], pos[i * 3 + 1] - centre[1], pos[i * 3 + 2] - centre[2])
+    if (q > radius) continue
+    const f = smoothstep(1 - q / radius) * (mask ? 1 - mask[i] : 1)
+    if (f <= 0) continue
+    pos[i * 3] += delta[0] * f
+    pos[i * 3 + 1] += delta[1] * f
+    pos[i * 3 + 2] += delta[2] * f
+    hits.push(i)
+  }
+  return hits
+}
+
+/** Relax the whole shape a little (unmasked points only): softens a rough sculpt in one go. */
+export function smoothAll(pos: Float32Array, adj: { start: Uint32Array; list: Uint32Array }, amount: number, mask?: Float32Array | null) {
+  const n = pos.length / 3
+  const next = new Float32Array(pos.length)
+  for (let i = 0; i < n; i++) {
+    let sx = 0
+    let sy = 0
+    let sz = 0
+    const a = adj.start[i]
+    const b = adj.start[i + 1]
+    for (let j = a; j < b; j++) {
+      const k = adj.list[j]
+      sx += pos[k * 3]
+      sy += pos[k * 3 + 1]
+      sz += pos[k * 3 + 2]
+    }
+    const c = Math.max(1, b - a)
+    const t = amount * (mask ? 1 - mask[i] : 1)
+    next[i * 3] = pos[i * 3] + (sx / c - pos[i * 3]) * t
+    next[i * 3 + 1] = pos[i * 3 + 1] + (sy / c - pos[i * 3 + 1]) * t
+    next[i * 3 + 2] = pos[i * 3 + 2] + (sz / c - pos[i * 3 + 2]) * t
+  }
+  pos.set(next)
+}
+
+/** Painted colours, one RGB byte triple per point. */
+export function encodePaint(cols: ArrayLike<number>): string {
+  const b = new Uint8Array(cols.length)
+  for (let i = 0; i < cols.length; i++) b[i] = Math.round(Math.min(1, Math.max(0, cols[i])) * 255)
+  let s = ''
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000))
+  return `p1:${btoa(s)}`
+}
+export function decodePaint(data: string, count: number): Float32Array | null {
+  if (!data.startsWith('p1:')) return null
+  try {
+    const s = atob(data.slice(3))
+    if (s.length !== count * 3) return null
+    const out = new Float32Array(s.length)
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) / 255
+    return out
+  } catch {
+    return null
+  }
 }

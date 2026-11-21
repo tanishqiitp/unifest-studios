@@ -282,7 +282,8 @@ export function liteProject(p: Project, images = false): Project {
     decor: (p.decor ?? []).filter((d) => d.kind !== 'model').map((d, i) => ({ ...d, id: `x${i}`, image: images ? d.image : undefined })),
     set: (p.set ?? []).map((s) => ({ ...s, image: images ? s.image : undefined })),
     // Sculpted shapes are too large for a link in the address, so those links show the plain shape.
-    parts: p.parts?.length ? p.parts.map((x) => ({ ...x, sculpt: images ? x.sculpt : undefined, mat: { ...x.mat, map: images ? x.mat.map : undefined } })) : undefined,
+    // Imported 3D files stay in the designer's browser, like Decor's models.
+    parts: p.parts?.length ? p.parts.filter((x) => x.kind !== 'mesh').map((x) => ({ ...x, sculpt: images ? x.sculpt : undefined, paint: images ? x.paint : undefined, mat: { ...x.mat, map: images ? x.mat.map : undefined } })) : undefined,
     setContent: images || !p.setContent?.startsWith('data:') ? p.setContent : undefined,
     brand: p.brand ? { ...p.brand, logo: images ? p.brand.logo : undefined } : undefined,
     quote: undefined,
