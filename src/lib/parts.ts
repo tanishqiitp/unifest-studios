@@ -169,7 +169,9 @@ export function partArea(p: Part) {
   const w = p.w * sx
   const d = p.d * sy
   const h = p.h * sz
-  const a = p.kind === 'plane' || p.kind === 'text' ? w * h : 2 * (w * h + w * d + h * d)
+  // Frames (dome struts, truss, spiral tube) are mostly open space: count a share of their box.
+  const open = p.kind === 'geodome' || p.kind === 'truss' || p.kind === 'helix' ? 0.15 : 1
+  const a = (p.kind === 'plane' || p.kind === 'text' ? w * h : 2 * (w * h + w * d + h * d)) * open
   // Growing copies are taller, so count each copy by its height factor.
   // For scatter, 'grow' is a random size variation around 1, so the average size stays 1.
   const grown = p.array && p.array.mode !== 'surface' && p.array.count > 1 && p.array.grow ? instances(p).reduce((t, i) => t + i.sy, 0) / Math.max(1, instances(p).length) : 1

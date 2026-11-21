@@ -902,7 +902,7 @@ function Viewport({ root }: { root: React.RefObject<THREE.Group | null> }) {
     if (o && objs[id] !== o) useModel.getState().set({ objs: { ...objs, [id]: o } })
   }, [])
   const pick = useCallback((id: string, e: ThreeEvent<MouseEvent>) => {
-    if (useModel.getState().tool) return
+    if (useModel.getState().tool || (e as unknown as { delta?: number }).delta! > 3) return
     const ps = parts()
     const target = e.detail >= 2 ? id : topOf(ps, id)
     const s = useModel.getState().sel
@@ -1544,7 +1544,7 @@ function SculptPanel({ p }: { p: Part }) {
   const up = (patch: Partial<Part>) => updatePart(p.id, patch)
   const restart = (patch: Partial<Part>) => {
     if (p.sculpt && !confirm('This starts the sculpt again from the plain shape. Your current sculpting is lost (Ctrl+Z brings it back). Continue?')) return
-    up({ ...patch, sculpt: undefined })
+    up({ ...patch, sculpt: undefined, paint: undefined })
   }
   return (
     <Section title="Sculpt">
@@ -2194,8 +2194,7 @@ const LINEAR = new Set<PartKind>(['text', 'drape', 'truss', 'extrude', 'stairs',
 /** Drag on the floor (or on top of a part) to draw the chosen shape; a click places it at its standard size. */
 function drawTool(el: HTMLElement, camera: THREE.Camera, scene: THREE.Scene) {
   el.style.cursor = 'crosshair'
-  let draft: { id: string; a: THREE.Vector3; y0: number; def: Vec3; moved: boolean } | null = null
-  let frame = 0
+  let draft: { id: string; kind: PartKind; a: THREE.Vector3; y0: number; def: Vec3; moved: boolean; pointer: number } | null = null
   const planeHit = (e: PointerEvent, y: number) => {
     const r = el.getBoundingClientRect()
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera)
@@ -2220,23 +2219,23 @@ function drawTool(el: HTMLElement, camera: THREE.Camera, scene: THREE.Scene) {
     const n = newPart(kind, [a.x, a.z, +y0.toFixed(3)])
     editParts((ps) => [...ps, n])
     useModel.getState().set({ sel: [n.id] })
-    draft = { id: n.id, a, y0, def: k.size, moved: false }
+    draft = { id: n.id, kind, a, y0, def: k.size, moved: false, pointer: e.pointerId }
     window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up, { once: true })
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
   const move = (e: PointerEvent) => {
-    if (!draft) return
+    if (!draft || e.pointerId !== draft.pointer) return
     const d0 = draft
     const b = planeHit(e, d0.y0)
     if (!b) return
-    cancelAnimationFrame(frame)
-    frame = requestAnimationFrame(() => {
+    {
       const dx = snap(b.x - d0.a.x)
       const dz = snap(b.z - d0.a.z)
       if (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) return
       d0.moved = true
       const [dw, dd, dh] = d0.def
-      const kind = useModel.getState().drawKind!
+      const kind = d0.kind
       let patch: Partial<Part>
       if (LINEAR.has(kind)) {
         const len = Math.max(0.1, Math.hypot(dx, dz))
@@ -2251,14 +2250,18 @@ function drawTool(el: HTMLElement, camera: THREE.Camera, scene: THREE.Scene) {
         patch = { w: +w.toFixed(2), d: +d.toFixed(2), h: +h.toFixed(2), pos: [d0.a.x + (sx * w) / 2, d0.a.z + (sz * d) / 2, +d0.y0.toFixed(3)] }
       }
       editParts((ps) => ps.map((p) => (p.id === d0.id ? { ...p, ...patch } : p)))
-    })
+    }
   }
-  const up = () => {
+  const up = (e: PointerEvent) => {
+    if (draft && e.pointerId !== draft.pointer) return
     window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
     const d0 = draft
     draft = null
     if (!d0) return
-    const name = PART_KINDS[useModel.getState().drawKind as Exclude<PartKind, 'group'>]?.name ?? 'Shape'
+    swallowClick(el)
+    const name = PART_KINDS[d0.kind as Exclude<PartKind, 'group'>]?.name ?? 'Shape'
     useModel.getState().set({ tool: null, drawKind: null, sel: [d0.id], mode: 'translate' })
     notify(d0.moved ? `Drew a ${name.toLowerCase()}. Drag the box handles to resize it.` : `Added a ${name.toLowerCase()} at the standard size`)
   }
@@ -2267,8 +2270,16 @@ function drawTool(el: HTMLElement, camera: THREE.Camera, scene: THREE.Scene) {
     el.style.cursor = ''
     el.removeEventListener('pointerdown', down, true)
     window.removeEventListener('pointermove', move)
-    cancelAnimationFrame(frame)
+    window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
   }
+}
+
+/** The click that ends a drag must not also select whatever is under the pointer. */
+function swallowClick(el: HTMLElement) {
+  const stop = (e: MouseEvent) => e.stopImmediatePropagation()
+  el.addEventListener('click', stop, { capture: true, once: true })
+  setTimeout(() => el.removeEventListener('click', stop, { capture: true }), 400)
 }
 
 type Handle = { x: -1 | 0 | 1; y: 0 | 0.5 | 1; z: -1 | 0 | 1; corner: boolean }
@@ -2291,14 +2302,21 @@ function SizeBox() {
   const tool = useModel((s) => s.tool)
   const sculpting = useSculpt((s) => s.on)
   const all = useStore((s) => s.project.parts ?? NO_PARTS)
-  const { camera, gl, invalidate } = useThree()
+  const { camera, gl, invalidate, scene } = useThree()
   const grp = useRef<THREE.Group>(null)
   const knobs = useRef<THREE.Group>(null)
   const p = sel.length === 1 ? all.find((x) => x.id === sel[0]) : undefined
   const obj = p ? objs[p.id] : undefined
-  const W = p ? p.w * Math.abs(p.scl[0]) : 1
-  const D = p ? p.d * Math.abs(p.scl[1]) : 1
-  const H = p ? p.h * Math.abs(p.scl[2]) : 1
+  // World scale includes the part's own scale and any scaled group it sits in.
+  const ws = useMemo(() => {
+    if (!obj?.parent) return new THREE.Vector3(1, 1, 1)
+    obj.updateWorldMatrix(true, false)
+    return obj.getWorldScale(new THREE.Vector3())
+  }, [obj, p]) // eslint-disable-line react-hooks/exhaustive-deps
+  const W = p ? p.w * Math.abs(ws.x) : 1
+  const D = p ? p.d * Math.abs(ws.z) : 1
+  const H = p ? p.h * Math.abs(ws.y) : 1
+  useEffect(() => () => void (document.body.style.cursor = ''), [])
   const edges = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(W, H, D).translate(0, H / 2, 0)), [W, H, D])
   useEffect(() => () => edges.dispose(), [edges])
   const tmp = useMemo(() => ({ v: new THREE.Vector3(), q: new THREE.Quaternion(), s: new THREE.Vector3() }), [])
@@ -2316,6 +2334,10 @@ function SizeBox() {
   if (!show) return null
   const controls = () => view.controls as unknown as { enabled: boolean } | undefined
   const start = (h: Handle) => (e: ThreeEvent<PointerEvent>) => {
+    // The move/rotate/scale handles win where they overlap.
+    let gizmoHot = false
+    scene.traverse((o) => void ((o as unknown as { isTransformControls?: boolean; axis?: string | null }).isTransformControls && (o as unknown as { axis?: string | null }).axis && (gizmoHot = true)))
+    if (gizmoHot) return
     e.stopPropagation()
     const c = controls()
     if (c) c.enabled = false
@@ -2330,9 +2352,13 @@ function SizeBox() {
     const P0 = hl.clone().applyQuaternion(q).add(O)
     const part = p!
     const magnet = useStore.getState().ui.magnet
-    let raf = 0
     const r2 = (n: number) => Math.round(n * 1000) / 1000
+    const sx = Math.abs(ws.x) || 1
+    const sy = Math.abs(ws.y) || 1
+    const sz = Math.abs(ws.z) || 1
+    const pid = e.pointerId
     const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return
       const rect = gl.domElement.getBoundingClientRect()
       ray.setFromCamera(new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1), camera)
       const v = ray.ray.direction
@@ -2360,14 +2386,15 @@ function SizeBox() {
       }
       const world = shift.applyQuaternion(q).add(O)
       const pos = fromThree(obj!.parent!.worldToLocal(world)).map(r2) as Vec3
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() =>
-        editParts((ps) => ps.map((x) => (x.id === part.id ? { ...x, pos, w: r2(nW / Math.abs(part.scl[0] || 1)), d: r2(nD / Math.abs(part.scl[1] || 1)), h: r2(nH / Math.abs(part.scl[2] || 1)) } : x))),
-      )
+      // Applied straight away (pointer moves arrive once per frame), so the whole drag is one undo step.
+      editParts((ps) => ps.map((x) => (x.id === part.id ? { ...x, pos, w: r2((nW / sx) * Math.abs(part.scl[0] || 1)), d: r2((nD / sz) * Math.abs(part.scl[1] || 1)), h: r2((nH / sy) * Math.abs(part.scl[2] || 1)) } : x)))
     }
-    const end = () => {
+    const end = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      swallowClick(gl.domElement)
       const c2 = controls()
       if (c2) c2.enabled = true
       document.body.style.cursor = ''
@@ -2375,6 +2402,7 @@ function SizeBox() {
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
   }
   return (
     <group ref={grp} userData={{ helper: true }}>

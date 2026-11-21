@@ -306,14 +306,13 @@ function useMap(src?: string) {
   return t
 }
 
-function usePartMaterial(p: Part, shading: Shading, led: THREE.Texture | null, mirrored: boolean) {
+function usePartMaterial(p: Part, shading: Shading, led: THREE.Texture | null, mirrored: boolean, painted = false) {
   const m: PartMat = p.mat
   const map = useMap(m.map)
   const fontReady = useSyncExternalStore(subscribeFont, fontState) === 'ready'
   const flatText = p.kind === 'text' && !(p.solid && fontReady)
   const text = useMemo(() => (flatText ? textTexture(p.text || ' ', p.w, p.h) : null), [flatText, p.text, p.w, p.h])
   useEffect(() => () => text?.dispose(), [text])
-  const painted = p.kind === 'sculpt' && !!p.paint
   const mat = useMemo(() => {
     const solid = shading === 'solid'
     const tex = solid ? null : m.led ? led : map
@@ -432,7 +431,8 @@ function PartNode({ p, mirrored, root, copy = 0 }: { p: Part; mirrored?: boolean
   }, [geo, ck, csg]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => cut?.dispose(), [cut])
   const shape = cut ?? geo
-  const partMat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored)
+  // Painted colours only when the final shape carries them (a hole cut or a detail change drops them).
+  const partMat = usePartMaterial(p, ctx.shading, ctx.led, !!mirrored, !!shape?.getAttribute('color'))
   const mat = p.cutter ? CUTTER_MAT : partMat
   // Alternating copies share one second material in the alternate colour.
   const altColor = p.array?.alt
