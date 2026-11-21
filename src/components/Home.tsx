@@ -282,8 +282,16 @@ export function Home() {
         <section id="templates" className="pb-20 scroll-mt-20">
           <h2 className="font-display text-xl font-semibold">Start from a template</h2>
           <p className="text-xs text-mute mt-0.5 mb-4">Complete, safe starting layouts. Every part is editable.</p>
+          {[undefined, ...new Set(templates.map(({ t }) => t.region).filter(Boolean))].map((region) => (
+          <div key={region ?? 'all'} className={region ? 'mt-8' : ''}>
+          {region && (
+            <div className="mb-3">
+              <h3 className="font-display text-base font-semibold">{region}</h3>
+              <p className="text-[11px] text-mute">Set up like real events held here. Crowds and venues are from published reports; stage, screen and sound sizes are typical for that scale.</p>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {templates.map(({ t, p }) => (
+            {templates.filter(({ t }) => t.region === region).map(({ t, p }) => (
               <button key={t.name} className="text-left rounded-xl border border-line hover:border-white transition-colors overflow-hidden" onClick={() => open({ ...p, id: undefined })}>
                 <div className="aspect-[4/3] bg-black p-2">
                   <ProjectThumb p={p} />
@@ -294,10 +302,13 @@ export function Home() {
                   <div className="mono text-[10px] text-dim mt-2">
                     {t.audience.toLocaleString('en-IN')} ppl · {t.venueW}×{t.venueL} m
                   </div>
+                  {t.source && <div className="text-[10px] text-mute mt-1.5 leading-snug line-clamp-3" title={t.source}>{t.source}</div>}
                 </div>
               </button>
             ))}
           </div>
+          </div>
+          ))}
         </section>
       </div>
       <SiteSections />

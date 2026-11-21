@@ -1,7 +1,7 @@
 import { normalizeProject } from '../migrate'
 import Drawing from 'dxf-writer'
 import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string'
-import type { Deck, Project, Table } from '../../types'
+import type { Deck, Project, SoundSource, Table } from '../../types'
 import { cableOrder, pixelLayout, rigging, screenColumns, screenStats, TRUSS_INFO } from '../calc'
 
 export function download(name: string, data: Blob | string, type = 'text/plain') {
@@ -285,7 +285,8 @@ export function liteProject(p: Project, images = false): Project {
     // Imported 3D files stay in the designer's browser, like Decor's models.
     parts: p.parts?.length ? p.parts.filter((x) => x.kind !== 'mesh').map((x) => ({ ...x, sculpt: images ? x.sculpt : undefined, paint: images ? x.paint : undefined, mat: { ...x.mat, map: images ? x.mat.map : undefined } })) : undefined,
     // The client sees the speakers in 3D; the input list and monitor mixes are crew paperwork.
-    sound: p.sound ? { ...p.sound, inputs: undefined, mixes: undefined } : undefined,
+    // Speakers travel as compact rows (see packSound), like tables.
+    sound: p.sound ? { ...p.sound, sources: [], inputs: undefined, mixes: undefined } : undefined,
     setContent: images || !p.setContent?.startsWith('data:') ? p.setContent : undefined,
     brand: p.brand ? { ...p.brand, logo: images ? p.brand.logo : undefined } : undefined,
     quote: undefined,
@@ -306,6 +307,7 @@ export function liteProject(p: Project, images = false): Project {
   }
   for (const k of LISTS) (lite[k] as unknown as Record<string, unknown>[]) = (lite[k] as unknown as Record<string, unknown>[]).map(dropDefaults)
   ;(lite as Project & { tb?: unknown[] }).tb = packTables(p.tables ?? [])
+  if (p.sound?.sources.length) (lite as Project & { ss?: unknown[] }).ss = packSound(p.sound.sources)
   return JSON.parse(JSON.stringify(lite, (_k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v)))
 }
 
@@ -342,8 +344,33 @@ export function restoreDefaults(p: Project): Project {
     p.tables = unpackTables(packed)
     delete (p as Project & { tb?: unknown }).tb
   }
+  const ss = (p as Project & { ss?: unknown[][] }).ss
+  if (ss) {
+    if (p.sound) p.sound.sources = unpackSound(ss)
+    delete (p as Project & { ss?: unknown }).ss
+  }
   p.guests ??= []
   return p
+}
+
+// Speaker row: [kind, role, x, y, z, aim, boxes, flown, delay, manualDelay, label], trailing defaults left off.
+const cm = (n: number) => Math.round(n * 100) / 100
+export function packSound(list: SoundSource[]): unknown[][] {
+  return list.map((s) => {
+    const row: unknown[] = [s.kind, s.role, cm(s.x), cm(s.y), cm(s.z), cm(s.aim), s.boxes, s.flown ? 1 : 0, s.delay !== undefined ? cm(s.delay) : 0, s.manualDelay ? 1 : 0, s.label ?? '']
+    while (row.length > 7 && (row[row.length - 1] === 0 || row[row.length - 1] === '')) row.pop()
+    return row
+  })
+}
+export function unpackSound(rows: unknown[][]): SoundSource[] {
+  return rows.map((r, i) => {
+    const [kind, role, x, y, z, aim, boxes, flown, delay, manual, label] = r as [string, SoundSource['role'], number, number, number, number, number, number?, number?, number?, string?]
+    const s: SoundSource = { id: `o${i}`, kind, role, x, y, z, aim, boxes, flown: !!flown }
+    if (delay) s.delay = delay
+    if (manual) s.manualDelay = true
+    if (label) s.label = label
+    return s
+  })
 }
 
 export function readShareHash(): Project | null {

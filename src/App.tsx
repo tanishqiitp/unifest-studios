@@ -4,7 +4,7 @@ import { SavePoints } from './components/SavePoints'
 import { exportProject } from './lib/export/files'
 import { loadSummary } from './lib/loads'
 import { AppCrash, ErrorBoundary, retryImport, Safe3D } from './components/Safe3D'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanyPanel } from './components/SiteSections'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ThemeButton } from './components/ThemePicker'
@@ -736,8 +736,10 @@ function Wizard() {
         </div>
         <div className="md:col-span-3">
           <div className="label mb-3">Or start from a template</div>
-          <div className="grid grid-cols-2 gap-2">
-            {TEMPLATES.map((t) => (
+          <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
+            {TEMPLATES.map((t, i) => (
+              <Fragment key={t.name}>
+              {t.region && t.region !== TEMPLATES[i - 1]?.region && <div className="col-span-2 label mt-2">{t.region}</div>}
               <button key={t.name} className="text-left rounded-xl border border-line p-3 hover:border-white transition-colors" onClick={() => create(t)}>
                 <div className="text-sm font-medium">{t.name}</div>
                 <div className="text-[11px] text-mute mt-0.5 leading-snug">{t.blurb}</div>
@@ -745,6 +747,7 @@ function Wizard() {
                   {t.audience.toLocaleString('en-IN')} ppl · {t.venueW}×{t.venueL} m
                 </div>
               </button>
+              </Fragment>
             ))}
           </div>
         </div>
